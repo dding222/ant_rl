@@ -18,11 +18,32 @@ from isaaclab.utils import configclass
 
 import isaaclab_tasks.manager_based.classic.humanoid.mdp as mdp
 
+import isaaclab.terrains as terrain_gen
+import torch
+
 ##
 # Pre-defined configs
 ##
 from isaaclab_assets.robots.ant import ANT_CFG  # isort: skip
 
+TERRAIN_CFG = terrain_gen.TerrainImporterCfg(
+    seed=42,
+    curriculum=False,
+    size=(8.0, 8.0),
+    boder_width=20.0,
+    num_rows=10,
+    num_cols=20,
+    use_cache=False,
+    sub_terrains={
+        "random_grid": terrain_gen.MeshRandomGridTerrainCfg(
+            proportion=1.0,
+            grid_width=0.45,
+            grid_height_range=(0.05, 0.20),
+            platform_width=2.0,
+            holes=False,
+        ),
+    },
+)
 
 @configclass
 class MySceneCfg(InteractiveSceneCfg):
@@ -31,12 +52,13 @@ class MySceneCfg(InteractiveSceneCfg):
     # terrain
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
-        terrain_type="plane",
+        terrain_type="generator",
+        terrain_generator=TERRAIN_CFG,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
-            friction_combine_mode="average",
-            restitution_combine_mode="average",
-            static_friction=1.0,
+            friction_combine_mode="multiply",
+            restitution_combine_mode="multiply",
+            static_friction=1.0,        # 바닥의 마찰계수는 1로 설정, 로봇의 마찰계수만 변경
             dynamic_friction=1.0,
             restitution=0.0,
         ),
@@ -101,6 +123,26 @@ class ObservationsCfg:
     policy: PolicyCfg = PolicyCfg()
 
 
+def randomize_robot_friction(env, env_ids, asset_cfg, min_fric, max_fric):
+    robot = env.scene[asset_cfg.name]
+
+    if env_ids is None:
+        env_ids = torch.arange(env.scene.num_envs, device="cpu")
+    else:
+        env_ids = env_ids.cpu()
+
+    materials = robot.root_physx_view.get_material_properties()
+
+    mu_static = torch.empty((len(env_ids), 1), device="cpu").uniform_(min_fric, max_fric)
+    mu_dynamic = 0.8 * mu_static  # dynamic friction is 80% of static friction
+
+    materials[env_ids, :, 0] = mu_static   # static friction
+    materials[env_ids, :, 1] = mu_dynamic   # dynamic friction
+    materials[env_ids, :, 2] = 0.0
+
+    robot.root_physx_view.set_material_properties(materials, env_ids)
+
+
 @configclass
 class EventCfg:
     """Configuration for events."""
@@ -119,7 +161,16 @@ class EventCfg:
             "velocity_range": (-0.1, 0.1),
         },
     )
-
+    # 로봇의 마찰계수를 랜덤으로 적용해서 학습
+    random_friction = EventTerm(
+        func=randomize_robot_friction,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+            "min_fric": 0.3,
+            "max_fric": 1.0 
+        }
+    )
 
 @configclass
 class RewardsCfg:
