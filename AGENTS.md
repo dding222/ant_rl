@@ -24,6 +24,7 @@ The final policy must move forward stably under different friction conditions wh
 ```text
 ant/
 ├── AGENTS.md
+├── pyproject.toml
 ├── scripts/
 │   └── rsl_rl/
 │       ├── cli_args.py
@@ -33,6 +34,7 @@ ant/
     └── ant/
         ├── __init__.py
         ├── ant_env_cfg.py
+        ├── rewards.py
         └── agents/
             ├── __init__.py
             └── rsl_rl_ppo_cfg.py
@@ -48,6 +50,9 @@ Generated `.vscode` database files under `source/ant/.vscode/` are not part of t
 - `source/ant/ant_env_cfg.py`
   - Defines the scene, Ant asset, actions, observations, events, rewards, terminations, and simulation settings.
   - This is the main file for terrain and friction changes.
+- `source/ant/rewards.py`
+  - Contains all seven reward calculations used by `RewardsCfg`.
+  - Reward equations can be modified here without editing Isaac Lab source files.
 - `source/ant/agents/rsl_rl_ppo_cfg.py`
   - Defines the RSL-RL PPO runner, actor-critic, and PPO hyperparameters.
 - `scripts/rsl_rl/train.py`
@@ -59,15 +64,16 @@ Generated `.vscode` database files under `source/ant/.vscode/` are not part of t
 
 ## Current implementation state
 
-The code is syntactically valid, but the requested experiment is not implemented yet.
+The code is syntactically valid, and the initial rough-terrain and friction-randomization implementation is present.
 
 Current environment behavior:
 
-- Terrain is still `terrain_type="plane"`.
-- Terrain static and dynamic friction are fixed at `1.0`.
-- There is no friction randomization event.
+- Terrain uses deterministic `MeshRandomGridTerrainCfg` square tiles with seed `42`.
+- Terrain friction is fixed at `1.0` with multiply combination mode.
+- Robot friction is randomized once at startup for each environment.
 - There is no terrain height scanner.
-- The policy uses the original classic Ant observations and rewards.
+- The policy uses the original classic Ant observations.
+- All active reward calculations are local in `source/ant/rewards.py` while retaining the original formulas and weights.
 - The environment imports the shared classic humanoid MDP functions from Isaac Lab.
 - The robot uses `isaaclab_assets.robots.ant.ANT_CFG`.
 - The PPO configuration is still based on the built-in Ant example.
@@ -85,50 +91,29 @@ The following copied generic features were intentionally removed because this pr
 
 Resolve these before attempting full training:
 
-1. The registered task ID is still `Isaac-Ant-v0`, which conflicts with Isaac Lab's built-in task. Rename it to a unique ID such as `Isaac-Ant-Rough-Friction-v0`.
-2. `train.py` and `play.py` import `isaaclab_tasks` but do not import this project's `ant` package. Add `import ant` after Isaac Sim has launched and before Hydra resolves the task configuration.
-3. The `source` directory must be importable. Either install the project as a package or launch with `PYTHONPATH=$PWD/source` from the project root.
-4. Full runtime validation has not been performed in the current shell because Isaac Lab is not importable here. Only Python syntax compilation has been verified.
+1. `play.py` does not import this project's `ant` package, so the custom task may not be registered during playback.
+2. Install the project into the Isaac Lab environment with `python -m pip install -e .` or launch with `PYTHONPATH=$PWD/source`.
+3. Full simulator smoke testing is still required. Python syntax compilation and Gym registration with `PYTHONPATH` have been verified.
 
-## Required implementation work
+## Remaining implementation work
 
 Complete tasks in this order.
 
-### 1. Make the custom task runnable
+### 1. Finish task execution setup
 
-- Rename the Gym task ID to `Isaac-Ant-Rough-Friction-v0`.
-- Import `ant` in both RSL-RL scripts so that Gym registration runs.
-- Confirm that the task appears in the Gym registry.
-- Start with a small smoke test such as 4 to 16 environments before using 4096 environments.
+- Import `ant` in `play.py` so Gym registration runs during playback.
+- Install the project with `python -m pip install -e .` in the Isaac Lab environment.
+- Start with a smoke test using 4 to 16 environments before using 4096 environments.
 
-### 2. Replace the plane with fixed square-tile rough terrain
+### 2. Review local reward behavior
 
-Implement the terrain directly in `ant_env_cfg.py`; a separate terrain file is not required.
+- Modify reward equations only in `source/ant/rewards.py`.
+- Confirm that progress reward measures forward XY displacement as intended.
+- Compare each `Episode_Reward/*` term before changing weights.
+- Check for policies that exploit the alive reward without moving.
+- Check whether energy and action penalties overwhelm progress on rough terrain.
 
-- Import `TerrainGeneratorCfg` and `isaaclab.terrains as terrain_gen`.
-- Set `terrain_type="generator"`.
-- Use only `terrain_gen.MeshRandomGridTerrainCfg` with `proportion=1.0`.
-- Configure tile width and tile height range explicitly.
-- Keep a flat spawn platform wide enough for the Ant initial pose.
-- Set a deterministic terrain seed.
-- Keep terrain curriculum disabled unless the experiment definition is changed later.
-- Use terrain material friction `1.0` with `friction_combine_mode="multiply"` so the robot material controls the effective coefficient.
-
-### 3. Add friction randomization
-
-Add a material event to `EventCfg` in `ant_env_cfg.py`.
-
-Initial implementation may use `mdp.randomize_rigid_body_material` in `startup` mode with a finite number of material buckets. Keep restitution fixed at zero.
-
-Important experimental detail:
-
-- Isaac Lab's built-in material randomizer samples static and dynamic friction separately and may assign different material buckets to different collision shapes.
-- If the experiment requires exactly one scalar `mu` per environment with `static_friction == dynamic_friction == mu` on every Ant collision shape, implement a small custom event instead of relying on the built-in randomizer.
-- Do not add any other domain-randomization event.
-
-The friction range is not decided yet. Treat it as an experiment parameter that must be chosen deliberately before long training runs.
-
-### 4. Decide whether terrain perception is allowed
+### 3. Decide whether terrain perception is allowed
 
 This is an explicit design choice, not an automatic addition.
 
@@ -137,15 +122,12 @@ This is an explicit design choice, not an automatic addition.
 
 Do not add the height scanner until this choice is made. If tile height differences are large, blind locomotion will be significantly harder.
 
-### 5. Validate reward and termination behavior on rough terrain
+### 4. Validate termination behavior on rough terrain
 
 - Check whether the fixed minimum torso height of `0.31` causes false termination on low tiles or gaps.
-- Confirm that progress reward measures forward XY displacement as intended.
-- Check for policies that exploit the alive reward without moving.
-- Check whether energy and action penalties overwhelm progress on rough terrain.
-- Tune rewards only after observing rollout metrics and videos; do not redesign them speculatively.
+- Tune termination settings only after observing rollout metrics and videos.
 
-### 6. Evaluate friction robustness
+### 5. Evaluate friction robustness
 
 Use separate training and evaluation checks:
 

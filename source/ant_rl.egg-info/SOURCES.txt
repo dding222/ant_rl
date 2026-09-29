@@ -1,6 +1,7 @@
 pyproject.toml
 source/ant/__init__.py
 source/ant/ant_env_cfg.py
+source/ant/rewards.py
 source/ant/agents/__init__.py
 source/ant/agents/rsl_rl_ppo_cfg.py
 source/ant_rl.egg-info/PKG-INFO

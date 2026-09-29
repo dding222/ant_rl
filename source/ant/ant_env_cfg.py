@@ -13,6 +13,7 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sensors import ContactSensorCfg
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 
@@ -21,18 +22,20 @@ import isaaclab_tasks.manager_based.classic.humanoid.mdp as mdp
 import isaaclab.terrains as terrain_gen
 import torch
 
+from . import rewards
+
 ##
 # Pre-defined configs
 ##
 from isaaclab_assets.robots.ant import ANT_CFG  # isort: skip
 
-TERRAIN_CFG = terrain_gen.TerrainImporterCfg(
+TERRAIN_CFG = terrain_gen.TerrainGeneratorCfg(
     seed=42,
     curriculum=False,
     size=(8.0, 8.0),
-    boder_width=20.0,
-    num_rows=10,
-    num_cols=20,
+    border_width=20.0,
+    num_rows=25,
+    num_cols=10,
     use_cache=False,
     sub_terrains={
         "random_grid": terrain_gen.MeshRandomGridTerrainCfg(
@@ -58,15 +61,25 @@ class MySceneCfg(InteractiveSceneCfg):
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
             restitution_combine_mode="multiply",
-            static_friction=1.0,        # 바닥의 마찰계수는 1로 설정, 로봇의 마찰계수만 변경
+            static_friction=1.0,        # 바닥의 마찰계수는 1로 설정, 로봇의 마찰계수만 변경 - 환경마다 다른 마찰계수
             dynamic_friction=1.0,
             restitution=0.0,
-        ),
+        ), 
         debug_vis=False,
     )
 
     # robot
     robot = ANT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    robot.spawn.usd_path = robot.spawn.usd_path.replace("ant_instanceable.usd", "ant.usd")
+    robot.spawn.activate_contact_sensors = True
+    robot.spawn.copy_from_source = True
+
+    # foot contacts
+    contact_forces = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/.*_foot",
+        history_length=3,
+        track_air_time=False,
+    )
 
     # lights
     light = AssetBaseCfg(
@@ -176,24 +189,7 @@ class EventCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    # (1) Reward for moving forward
-    progress = RewTerm(func=mdp.progress_reward, weight=1.0, params={"target_pos": (1000.0, 0.0, 0.0)})
-    # (2) Stay alive bonus
-    alive = RewTerm(func=mdp.is_alive, weight=0.5)
-    # (3) Reward for non-upright posture
-    upright = RewTerm(func=mdp.upright_posture_bonus, weight=0.1, params={"threshold": 0.93})
-    # (4) Reward for moving in the right direction
-    move_to_target = RewTerm(
-        func=mdp.move_to_target_bonus, weight=0.5, params={"threshold": 0.8, "target_pos": (1000.0, 0.0, 0.0)}
-    )
-    # (5) Penalty for large action commands
-    action_l2 = RewTerm(func=mdp.action_l2, weight=-0.005)
-    # (6) Penalty for energy consumption
-    energy = RewTerm(func=mdp.power_consumption, weight=-0.05, params={"gear_ratio": {".*": 15.0}})
-    # (7) Penalty for reaching close to joint limits
-    joint_pos_limits = RewTerm(
-        func=mdp.joint_pos_limits_penalty_ratio, weight=-0.1, params={"threshold": 0.99, "gear_ratio": {".*": 15.0}}
-    )
+    total_reward = RewTerm(func=rewards.TotalReward, weight=1.0)
 
 
 @configclass
@@ -211,7 +207,7 @@ class AntEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the MuJoCo-style Ant walking environment."""
 
     # Scene settings
-    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=5.0, clone_in_fabric=True)
+    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=5.0, clone_in_fabric=False)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
