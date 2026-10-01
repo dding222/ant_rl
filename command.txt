@@ -1,0 +1,69 @@
+TRAIN
+=====
+
+기본 학습:
+python scripts/rsl_rl/train.py --task Ant-rl-v0 --num_envs 4 --max_iterations 1 --headless
+
+기존 체크포인트부터 이어서 학습:
+python scripts/rsl_rl/train.py --task Ant-rl-v0 --num_envs 4096 --max_iterations 10000 --resume --load_run RUN_FOLDER --checkpoint CHECKPOINT_FILE --headless
+
+학습 영상도 함께 저장:
+python scripts/rsl_rl/train.py --task Ant-rl-v0 --num_envs 4096 --max_iterations 10000 --video --video_length 200 --video_interval 2000 --headless
+
+주요 train 인자:
+--task Ant-rl-v0              실행할 Gym 환경 ID
+--num_envs 4096               병렬 환경 개수
+--max_iterations 10000        PPO 학습 iteration 수
+--seed 42                     난수 seed, -1이면 무작위 seed
+--headless                    GUI 없이 실행
+--device cuda:0               시뮬레이션 장치
+--resume                      체크포인트부터 학습 재개
+--load_run RUN_FOLDER         불러올 run 폴더 이름
+--checkpoint CHECKPOINT_FILE  불러올 model_*.pt 파일
+--run_name NAME               로그 폴더에 붙일 run 이름
+--logger tensorboard          tensorboard, wandb, neptune 중 선택
+--video                       학습 영상 저장
+--video_length 200            영상 하나의 step 길이
+--video_interval 2000         영상을 저장할 step 간격
+
+
+PLAY
+====
+
+특정 체크포인트 재생:
+python scripts/rsl_rl/play.py --task Ant-rl-v0 --num_envs 4 --checkpoint logs/rsl_rl/ant/
+
+재생 영상 저장 후 종료:
+python scripts/rsl_rl/play.py --task Ant-rl-v0 --num_envs 1 --checkpoint logs/rsl_rl/ant/ --video --video_length 1000 --headless
+
+주요 play 인자:
+--task Ant-rl-v0              실행할 Gym 환경 ID
+--num_envs 1                  재생할 병렬 환경 개수
+--checkpoint PATH             불러올 model_*.pt 경로
+--seed 42                     환경 난수 seed
+--headless                    GUI 없이 실행
+--device cuda:0               시뮬레이션 장치
+--real-time                   가능한 경우 실제 시간 속도에 맞춰 재생
+--video                       재생 영상 저장
+--video_length 1000           저장할 영상의 step 길이
+--disable_fabric              Fabric 대신 USD I/O 사용
+
+
+TENSORBOARD
+===========
+
+특정 학습 run 확인:
+tensorboard --logdir logs/rsl_rl/ant/ --port 6006
+
+브라우저 접속 주소:
+http://localhost:6006
+
+주로 확인할 항목:
+Train/mean_reward             전체 평균 reward
+Train/mean_episode_length     평균 episode 길이
+Episode_Reward/*              개별 reward 항목
+Episode_Termination/*         종료 조건별 횟수
+Loss/*                        PPO loss 항목
+
+TensorBoard 종료:
+실행한 터미널에서 Ctrl+C

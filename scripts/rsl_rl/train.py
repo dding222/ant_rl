@@ -53,6 +53,7 @@ simulation_app = app_launcher.app
 
 import importlib.metadata as metadata
 import platform
+import statistics
 
 from packaging import version
 
@@ -97,6 +98,34 @@ torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = False
 
 
+#########################
+# Best model runner
+#########################
+
+
+class BestModelRunner(OnPolicyRunner):
+    """Save the policy with the highest logged mean episode reward."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.best_mean_reward = float("-inf")
+
+    def log(self, locs: dict, width: int = 80, pad: int = 35):
+        super().log(locs, width, pad)
+
+        if not locs["rewbuffer"]:
+            return
+
+        mean_reward = statistics.mean(locs["rewbuffer"])
+        if mean_reward <= self.best_mean_reward:
+            return
+
+        self.best_mean_reward = mean_reward
+        best_model_path = os.path.join(self.log_dir, "best_model.pt")
+        self.save(best_model_path, infos={"mean_reward": mean_reward})
+        print(f"[INFO] Saved best model with mean reward {mean_reward:.4f}: {best_model_path}")
+
+
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Train with RSL-RL agent."""
@@ -133,7 +162,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     log_root_path = os.path.abspath(log_root_path)
     print(f"[INFO] Logging experiment in directory: {log_root_path}")
     # specify directory for logging runs: {time-stamp}_{run_name}
-    log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_dir = datetime.now().strftime("%m%d_%H%M")
     # The Ray Tune workflow extracts experiment name using the logging line below, hence, do not
     # change it (see PR #2346, comment-2819298849)
     print(f"Exact experiment name requested from command line: {log_dir}")
@@ -168,7 +197,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     # wrap around environment for rsl-rl
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
-    runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
+    runner = BestModelRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
     # write git state to logs
     runner.add_git_repo_to_log(__file__)
     # load the checkpoint
@@ -180,6 +209,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     # dump the configuration into log-directory
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
+    reward_params = {
+        name: getattr(ant.rewards, name)
+        for name in dir(ant.rewards)
+        if name.endswith("_WEIGHT")
+    }
+    dump_yaml(os.path.join(log_dir, "params", "reward_weights.yaml"),reward_params)
 
     # run training
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)

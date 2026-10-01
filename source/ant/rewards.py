@@ -17,17 +17,25 @@ if TYPE_CHECKING:
 # Reward weights
 #########################
 
-PROGRESS_WEIGHT = 1.0
+PROGRESS_WEIGHT = 2.5
 ALIVE_WEIGHT = 0.5
-UPRIGHT_WEIGHT = 0.1
-HEADING_WEIGHT = 0.5
-ACTION_WEIGHT = -0.005
-ENERGY_WEIGHT = -0.05
-JOINT_LIMIT_WEIGHT = -0.1
-LOW_CONTACT_WEIGHT = -1.0
-FOOT_SLIP_WEIGHT = -0.1
+UPRIGHT_WEIGHT = 0.05
+HEADING_WEIGHT = 1.5
+CONTACT_WEIGHT = 1.0
 
-CONTACT_FORCE_THRESHOLD = 1.0
+ACTION_WEIGHT = -0.005
+ENERGY_WEIGHT = -0.15
+JOINT_VEL_WEIGHT = -0.001
+JOINT_LIMIT_WEIGHT = -0.5
+FOOT_SLIP_WEIGHT = -0.07
+
+#########################
+# Contact parameter
+#########################
+
+CONTACT_FORCE_THRESHOLD = 5.0
+# PRINT_CONTACT_FORCES = True
+# CONTACT_PRINT_INTERVAL = 1
 
 #########################
 # Total reward
@@ -45,16 +53,18 @@ class TotalReward(ManagerTermBase):
         self.potentials = torch.zeros(env.num_envs, device=env.device)
         self.prev_potentials = torch.zeros_like(self.potentials)
         contact_sensor = env.scene.sensors["contact_forces"]
+        self.foot_names = contact_sensor.body_names
         self.foot_body_ids, _ = robot.find_bodies(contact_sensor.body_names, preserve_order=True)
         self.episode_sums = {
             "progress": torch.zeros(env.num_envs, device=env.device),
             "alive": torch.zeros(env.num_envs, device=env.device),
             "upright": torch.zeros(env.num_envs, device=env.device),
             "move_to_target": torch.zeros(env.num_envs, device=env.device),
+            "foot_contact": torch.zeros(env.num_envs, device=env.device),
             "action_l2": torch.zeros(env.num_envs, device=env.device),
             "energy": torch.zeros(env.num_envs, device=env.device),
             "joint_pos_limits": torch.zeros(env.num_envs, device=env.device),
-            "low_foot_contact": torch.zeros(env.num_envs, device=env.device),
+            "joint_velocity": torch.zeros(env.num_envs, device=env.device),
             "foot_slip": torch.zeros(env.num_envs, device=env.device),
         }
 
@@ -143,6 +153,12 @@ class TotalReward(ManagerTermBase):
         )
 
         #########################
+        # Joint velocity penalty
+        #########################
+
+        vel_penalty = torch.sum(torch.square(joint_vel), dim=-1)
+
+        #########################
         # Joint limit penalty
         #########################
 
@@ -153,27 +169,31 @@ class TotalReward(ManagerTermBase):
         )
         joint_limit_threshold = 0.99
 
-        joint_limit_violation = (torch.abs(joint_pos_scaled) - joint_limit_threshold) / (
-            1 - joint_limit_threshold
-        )
+        joint_limit_violation = (torch.abs(joint_pos_scaled) - joint_limit_threshold) / (1 - joint_limit_threshold)
         joint_limit_violation = joint_limit_violation * self.gear_ratio_scaled
-        joint_limit_penalty = torch.sum(
-            (torch.abs(joint_pos_scaled) > joint_limit_threshold) * joint_limit_violation,
-            dim=-1,
-        )
+        joint_limit_penalty = torch.sum((torch.abs(joint_pos_scaled) > joint_limit_threshold) * joint_limit_violation, dim=-1)
+
+        #########################
+        # foot contact reward
+        #########################
 
         vertical_contact_force = contact_force_history[..., 2].amax(dim=1)
         feet_in_contact = vertical_contact_force > CONTACT_FORCE_THRESHOLD
 
-        #########################
-        # Minimum foot contact penalty
-        #########################
+        contact_count = feet_in_contact.sum(dim=1)
+        contact_reward = (contact_count >= 2).float()
 
-        airborne_foot_count = (~feet_in_contact).sum(dim=1)
-        low_contact_penalty = torch.clamp(airborne_foot_count - 2, min=0).float()
+        # if PRINT_CONTACT_FORCES and env.common_step_counter % CONTACT_PRINT_INTERVAL == 0:
+        #     force_values = vertical_contact_force[0].detach().cpu().tolist()
+        #     contact_values = feet_in_contact[0].detach().cpu().tolist()
+        #     foot_states = ", ".join(
+        #         f"{name}={force:.2f}N ({'contact' if in_contact else 'air'})"
+        #         for name, force, in_contact in zip(self.foot_names, force_values, contact_values)
+        #     )
+        #     print(f"[CONTACT][step={env.common_step_counter}] {foot_states}", flush=True)
 
         #########################
-        # Foot slip penalty
+        # Foot slip penalty 
         #########################
 
         foot_speed_xy = torch.norm(foot_lin_vel[..., :2], dim=-1)
@@ -188,10 +208,11 @@ class TotalReward(ManagerTermBase):
             "alive": ALIVE_WEIGHT * alive_reward,
             "upright": UPRIGHT_WEIGHT * upright_reward,
             "move_to_target": HEADING_WEIGHT * heading_reward,
+            "foot_contact": CONTACT_WEIGHT * contact_reward,
             "action_l2": ACTION_WEIGHT * action_penalty,
             "energy": ENERGY_WEIGHT * energy_penalty,
+            "joint_velocity": JOINT_VEL_WEIGHT * vel_penalty,
             "joint_pos_limits": JOINT_LIMIT_WEIGHT * joint_limit_penalty,
-            "low_foot_contact": LOW_CONTACT_WEIGHT * low_contact_penalty,
             "foot_slip": FOOT_SLIP_WEIGHT * foot_slip_penalty,
         }
 

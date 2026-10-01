@@ -3,6 +3,8 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import math
+
 import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
@@ -79,6 +81,8 @@ class MySceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/.*_foot",
         history_length=3,
         track_air_time=False,
+        force_threshold=1.0,
+        debug_vis=True,
     )
 
     # lights
@@ -174,7 +178,7 @@ class EventCfg:
             "velocity_range": (-0.1, 0.1),
         },
     )
-    # 로봇의 마찰계수를 랜덤으로 적용해서 학습
+    # 로봇의 마찰계수를 랜덤으로 적용해서 학습   0.3 ~ 1.0
     random_friction = EventTerm(
         func=randomize_robot_friction,
         mode="startup",
@@ -200,6 +204,8 @@ class TerminationsCfg:
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     # (2) Terminate if the robot falls
     torso_height = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.31})
+    # (3) Terminate if the body z-axis points downward
+    body_z_down = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": math.pi / 2})
 
 
 @configclass
