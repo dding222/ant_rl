@@ -11,8 +11,6 @@ from isaaclab.managers import ManagerTermBase, RewardTermCfg
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
-
-
 #########################
 # Reward weights
 #########################

@@ -17,11 +17,12 @@ from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg
 from isaaclab.terrains import TerrainImporterCfg
+from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
 from isaaclab.utils import configclass
 
 import isaaclab_tasks.manager_based.classic.humanoid.mdp as mdp
 
-import isaaclab.terrains as terrain_gen
+# import isaaclab.terrains as terrain_gen
 import torch
 
 from . import rewards
@@ -31,24 +32,64 @@ from . import rewards
 ##
 from isaaclab_assets.robots.ant import ANT_CFG  # isort: skip
 
-TERRAIN_CFG = terrain_gen.TerrainGeneratorCfg(
-    seed=42,
-    curriculum=False,
-    size=(8.0, 8.0),
-    border_width=20.0,
-    num_rows=25,
-    num_cols=10,
-    use_cache=False,
-    sub_terrains={
-        "random_grid": terrain_gen.MeshRandomGridTerrainCfg(
-            proportion=1.0,
-            grid_width=0.45,
-            grid_height_range=(0.05, 0.20),
-            platform_width=2.0,
-            holes=False,
-        ),
-    },
-)
+# TERRAIN_CFG = terrain_gen.TerrainGeneratorCfg(
+#     seed=42,
+#     curriculum=False,
+#     size=(8.0, 8.0),
+#     border_width=20.0,
+#     num_rows=25,
+#     num_cols=10,
+#     use_cache=False,
+#     sub_terrains={
+#         "random_grid": terrain_gen.MeshRandomGridTerrainCfg(
+#             proportion=1.0,
+#             grid_width=0.45,
+#             grid_height_range=(0.05, 0.20),
+#             platform_width=2.0,
+#             holes=False,
+#         ),
+#     },
+# )
+
+
+#########################
+# random Terrain settings
+#########################
+
+TERRAIN_CFG = ROUGH_TERRAINS_CFG.copy()
+
+TERRAIN_CFG.size = (3.0, 3.0)
+TERRAIN_CFG.num_rows = 60
+TERRAIN_CFG.num_cols = 20
+TERRAIN_CFG.seed = 42
+TERRAIN_CFG.curriculum = False
+
+TERRAIN_CFG.sub_terrains["pyramid_stairs"].step_height_range = (0.03, 0.10)
+TERRAIN_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.03, 0.10)
+
+TERRAIN_CFG.sub_terrains["boxes"].grid_height_range = (0.02, 0.10)
+
+TERRAIN_CFG.sub_terrains["random_rough"].noise_range = (0.01, 0.05)
+
+TERRAIN_CFG.sub_terrains["hf_pyramid_slope"].slope_range = (0.0, 0.20)
+TERRAIN_CFG.sub_terrains["hf_pyramid_slope_inv"].slope_range = (0.0, 0.20)
+
+# sub_terrain border_width 설정
+TERRAIN_CFG.sub_terrains["pyramid_stairs"].border_width = 0.1
+TERRAIN_CFG.sub_terrains["pyramid_stairs_inv"].border_width = 0.1
+TERRAIN_CFG.sub_terrains["random_rough"].border_width = 0.1
+TERRAIN_CFG.sub_terrains["hf_pyramid_slope"].border_width = 0.1
+TERRAIN_CFG.sub_terrains["hf_pyramid_slope_inv"].border_width = 0.1
+
+# block 중앙의 flat 영역
+TERRAIN_CFG.sub_terrains["pyramid_stairs"].platform_width = 1.0
+TERRAIN_CFG.sub_terrains["pyramid_stairs_inv"].platform_width = 1.0
+TERRAIN_CFG.sub_terrains["boxes"].platform_width = 1.0
+TERRAIN_CFG.sub_terrains["hf_pyramid_slope"].platform_width = 1.0
+TERRAIN_CFG.sub_terrains["hf_pyramid_slope_inv"].platform_width = 1.0
+#########################
+#
+#########################
 
 @configclass
 class MySceneCfg(InteractiveSceneCfg):
@@ -91,7 +132,7 @@ class MySceneCfg(InteractiveSceneCfg):
         spawn=sim_utils.DistantLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),
     )
 
-
+ 
 ##
 # MDP settings
 ##
