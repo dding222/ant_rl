@@ -31,10 +31,16 @@ PLAY
 ====
 
 특정 체크포인트 재생:
-python scripts/rsl_rl/play.py --task Ant-rl-v0 --num_envs 4 --checkpoint logs/rsl_rl/ant/
+python scripts/rsl_rl/play.py --task Ant-rl-v0 --num_envs 4 --checkpoint logs/rsl_rl/ant/RUN_FOLDER/best_model.pt
 
 재생 영상 저장 후 종료:
 python scripts/rsl_rl/play.py --task Ant-rl-v0 --num_envs 1 --checkpoint logs/rsl_rl/ant/ --video --video_length 1000 --headless
+
+각 환경의 에피소드 평균 이동속도 기록:
+python scripts/rsl_rl/play.py --task Ant-rl-v0 --num_envs 4 --checkpoint logs/rsl_rl/ant/RUN_FOLDER/model_ITERATION.pt --record_vel
+
+속도 기록 파일:
+logs/rsl_rl/ant/RUN_FOLDER/play_episode_velocities.csv
 
 주요 play 인자:
 --task Ant-rl-v0              실행할 Gym 환경 ID
@@ -47,6 +53,7 @@ python scripts/rsl_rl/play.py --task Ant-rl-v0 --num_envs 1 --checkpoint logs/rs
 --video                       재생 영상 저장
 --video_length 1000           저장할 영상의 step 길이
 --disable_fabric              Fabric 대신 USD I/O 사용
+--record_vel                  종료된 각 env의 에피소드 평균 속도를 출력하고 CSV에 저장
 
 
 TENSORBOARD
