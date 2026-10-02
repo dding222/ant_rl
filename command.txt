@@ -5,14 +5,14 @@ TRAIN
 python scripts/rsl_rl/train.py --task Ant-rl-v0 --num_envs 4 --max_iterations 1 --headless
 
 기존 체크포인트부터 이어서 학습:
-python scripts/rsl_rl/train.py --task Ant-rl-v0 --num_envs 4096 --max_iterations 10000 --resume --load_run RUN_FOLDER --checkpoint CHECKPOINT_FILE --headless
+python scripts/rsl_rl/train.py --task Ant-rl-v0 --num_envs 256 --max_iterations 10000 --resume --load_run RUN_FOLDER --checkpoint CHECKPOINT_FILE --headless
 
 학습 영상도 함께 저장:
-python scripts/rsl_rl/train.py --task Ant-rl-v0 --num_envs 4096 --max_iterations 10000 --video --video_length 200 --video_interval 2000 --headless
+python scripts/rsl_rl/train.py --task Ant-rl-v0 --num_envs 64 --max_iterations 10000 --video --video_length 200 --video_interval 2000 --headless
 
 주요 train 인자:
 --task Ant-rl-v0              실행할 Gym 환경 ID
---num_envs 4096               병렬 환경 개수
+--num_envs 256                depth camera 학습용 권장 시작 환경 개수
 --max_iterations 10000        PPO 학습 iteration 수
 --seed 42                     난수 seed, -1이면 무작위 seed
 --headless                    GUI 없이 실행
@@ -25,6 +25,9 @@ python scripts/rsl_rl/train.py --task Ant-rl-v0 --num_envs 4096 --max_iterations
 --video                       학습 영상 저장
 --video_length 200            영상 하나의 step 길이
 --video_interval 2000         영상을 저장할 step 간격
+
+depth camera는 train/play 실행 시 자동으로 활성화됨
+기존 depth camera 없는 MLP 체크포인트는 이어서 학습할 수 없음
 
 
 PLAY

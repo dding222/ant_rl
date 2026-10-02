@@ -15,7 +15,7 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors import ContactSensorCfg
+from isaaclab.sensors import ContactSensorCfg, TiledCameraCfg
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
 from isaaclab.utils import configclass
@@ -25,7 +25,7 @@ import isaaclab_tasks.manager_based.classic.humanoid.mdp as mdp
 # import isaaclab.terrains as terrain_gen
 import torch
 
-from . import rewards
+from . import depth_obs, rewards
 
 ##
 # Pre-defined configs
@@ -58,28 +58,35 @@ from isaaclab_assets.robots.ant import ANT_CFG  # isort: skip
 
 TERRAIN_CFG = ROUGH_TERRAINS_CFG.copy()
 
-TERRAIN_CFG.size = (3.0, 3.0)
-TERRAIN_CFG.num_rows = 60
-TERRAIN_CFG.num_cols = 20
+TERRAIN_CFG.size = (10.0, 10.0)
+TERRAIN_CFG.num_rows = 20
+TERRAIN_CFG.num_cols = 10
 TERRAIN_CFG.seed = 42
 TERRAIN_CFG.curriculum = False
+TERRAIN_CFG.border_width = 2.0
 
-TERRAIN_CFG.sub_terrains["pyramid_stairs"].step_height_range = (0.03, 0.10)
-TERRAIN_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.03, 0.10)
+# 생성 확률
+TERRAIN_CFG.sub_terrains["pyramid_stairs"].proportion = 0.2
+TERRAIN_CFG.sub_terrains["hf_pyramid_slope"].proportion = 0.2
+TERRAIN_CFG.sub_terrains["boxes"].proportion = 0.2
+TERRAIN_CFG.sub_terrains["pyramid_stairs_inv"].proportion = 0.2
+TERRAIN_CFG.sub_terrains["hf_pyramid_slope_inv"].proportion = 0.2
+TERRAIN_CFG.sub_terrains["random_rough"].proportion = 0.0
 
+# 높이
+TERRAIN_CFG.sub_terrains["pyramid_stairs"].step_height_range = (0.03, 0.07)
+TERRAIN_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.03, 0.07)
 TERRAIN_CFG.sub_terrains["boxes"].grid_height_range = (0.02, 0.10)
 
-TERRAIN_CFG.sub_terrains["random_rough"].noise_range = (0.01, 0.05)
-
+# 기울기
 TERRAIN_CFG.sub_terrains["hf_pyramid_slope"].slope_range = (0.0, 0.20)
 TERRAIN_CFG.sub_terrains["hf_pyramid_slope_inv"].slope_range = (0.0, 0.20)
 
-# sub_terrain border_width 설정
-TERRAIN_CFG.sub_terrains["pyramid_stairs"].border_width = 0.1
-TERRAIN_CFG.sub_terrains["pyramid_stairs_inv"].border_width = 0.1
-TERRAIN_CFG.sub_terrains["random_rough"].border_width = 0.1
-TERRAIN_CFG.sub_terrains["hf_pyramid_slope"].border_width = 0.1
-TERRAIN_CFG.sub_terrains["hf_pyramid_slope_inv"].border_width = 0.1
+# border_width 설정
+TERRAIN_CFG.sub_terrains["pyramid_stairs"].border_width = 0
+TERRAIN_CFG.sub_terrains["pyramid_stairs_inv"].border_width = 0
+TERRAIN_CFG.sub_terrains["hf_pyramid_slope"].border_width = 0
+TERRAIN_CFG.sub_terrains["hf_pyramid_slope_inv"].border_width = 0
 
 # block 중앙의 flat 영역
 TERRAIN_CFG.sub_terrains["pyramid_stairs"].platform_width = 1.0
@@ -117,6 +124,27 @@ class MySceneCfg(InteractiveSceneCfg):
     robot.spawn.activate_contact_sensors = True
     robot.spawn.copy_from_source = True
 
+    # depth camera  64x48 / 15Hz / 0.1~5.0m
+    depth_camera = TiledCameraCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/torso/DepthCamera",
+        update_period=1.0 / 15.0,
+        height=48,
+        width=64,
+        data_types=["distance_to_camera"],
+        depth_clipping_behavior="max",
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=16.0,
+            focus_distance=5.0,
+            horizontal_aperture=20.955,
+            clipping_range=(0.1, 5.0),
+        ),
+        offset=TiledCameraCfg.OffsetCfg(
+            pos=(0.25, 0.0, 0.12),
+            rot=(0.9962, 0.0, 0.0872, 0.0),
+            convention="world",
+        ),
+    )
+
     # foot contacts
     contact_forces = ContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot/.*_foot",
@@ -137,7 +165,6 @@ class MySceneCfg(InteractiveSceneCfg):
 # MDP settings
 ##
 
-
 @configclass
 class ActionsCfg:
     """Action specifications for the MDP."""
@@ -153,7 +180,7 @@ class ObservationsCfg:
     class PolicyCfg(ObsGroup):
         """Observations for the policy."""
 
-        base_height = ObsTerm(func=mdp.base_pos_z)
+        # base_height = ObsTerm(func=mdp.base_pos_z)
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
         base_yaw_roll = ObsTerm(func=mdp.base_yaw_roll)
@@ -177,8 +204,26 @@ class ObservationsCfg:
             self.enable_corruption = False
             self.concatenate_terms = True
 
+    @configclass
+    class DepthCfg(ObsGroup):
+        """Depth images for the CNN encoder."""
+
+        image = ObsTerm(
+            func=depth_obs.normalized_depth,
+            params={
+                "sensor_cfg": SceneEntityCfg("depth_camera"),
+                "near_distance": 0.1,
+                "far_distance": 5.0,
+            },
+        )
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
     # observation groups
     policy: PolicyCfg = PolicyCfg()
+    depth: DepthCfg = DepthCfg()
 
 
 def randomize_robot_friction(env, env_ids, asset_cfg, min_fric, max_fric):
@@ -244,7 +289,7 @@ class TerminationsCfg:
     # (1) Terminate if the episode length is exceeded
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     # (2) Terminate if the robot falls
-    torso_height = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.31})
+    # torso_height = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.31})
     # (3) Terminate if the body z-axis points downward
     body_z_down = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": math.pi / 2})
 
@@ -254,7 +299,7 @@ class AntEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the MuJoCo-style Ant walking environment."""
 
     # Scene settings
-    scene: MySceneCfg = MySceneCfg(num_envs=4096, env_spacing=5.0, clone_in_fabric=False)
+    scene: MySceneCfg = MySceneCfg(num_envs=256, env_spacing=5.0, clone_in_fabric=False)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
