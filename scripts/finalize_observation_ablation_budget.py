@@ -3,6 +3,7 @@ import csv
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -45,6 +46,12 @@ def main():
     e = read(RESULT / 'evaluation_summary.json')
     m = read(TRAIN / 'manifest.json')
     assert t['completed'] and t['iterations'] == 1000 and t['total_transitions'] == 131072000
+    log = (TRAIN / 'run.log').read_text()
+    totals = re.findall(r'Total timesteps:\s+(\d+)', log)
+    iterations = re.findall(r'Learning iteration (\d+)/(\d+)', log)
+    assert int(totals[-1]) == 131072000 and len(iterations) == 1000 and iterations[-1] == ('999','1000')
+    t['actual_total_transitions'] = int(totals[-1])
+    t['actual_completed_iterations'] = len(iterations)
     assert not t['resume'] and t['load_run'] is None and t['load_checkpoint'] is None
     assert e['finite'] and e['first_episode_only'] and read(OUT / 'smoke_verified/smoke.json')['pass']
     assert t['checkpoint_sha256'] == read(RESULT / 'manifest.json')['checkpoint_sha256']
@@ -52,6 +59,9 @@ def main():
     for folder in [OUT / 'smoke_verified', TRAIN, RESULT]:
         p = read(folder / 'source_parity.json')
         assert p['hashes'] == core['hashes'] and p['reward_hash'] == core['reward_hash'] and p['ppo_hash'] == core['ppo_hash']
+    dependencies = read(EXP / 'shared/dependency_sources.json')
+    for name, expected in dependencies['sources'].items():
+        assert sha(Path('/home/zxro/IsaacLab_RS') / name) == expected, name
     sources = read(TRAIN / 'source_mapping.json')
     assert sources == read(RESULT / 'source_mapping.json') == read(OUT / 'smoke_verified/source_mapping.json')
     rows = list(csv.DictReader((RESULT / 'episode_metrics.csv').open()))
@@ -91,7 +101,7 @@ def main():
     dump(OUT / 'training_summary.json', t)
     dump(OUT / 'checkpoint_selection.json', dict(rule=t['selection'], fixed_before_training=True,
          selected_training_mean_return=t['selected_training_mean_reward'], checkpoints=records))
-    dump(OUT / 'source_mapping.json', dict(training=sources, evaluation=sources, finalizer_sha256=sha(Path(__file__))))
+    dump(OUT / 'source_mapping.json', dict(training=sources, evaluation=sources, canonical_dependencies=dependencies, finalizer_sha256=sha(Path(__file__))))
     for name in ['evaluation_summary.json','reward_components.csv','episode_metrics.csv','raycast_diagnostics.json']:
         shutil.copyfile(RESULT / name, OUT / name)
     with (OUT / 'main_metrics.csv').open('w', newline='') as f:
@@ -101,7 +111,7 @@ def main():
          observation=True, terrain_mesh=True, evaluation_terrain_assignment=True, budget_only_change=True))
     p = read(EXP / 'protocol.json')
     p.update(status='Canonical HeightScan complete; Base/DepthCam matching-budget results pending',
-             implementation_commit=m['git_commit'], canonical_heightscan='heightscan_4096x32x1000',
+             git_commit=m['git_commit'], implementation_commit=m['git_commit'], canonical_heightscan='heightscan_4096x32x1000',
              canonical_checkpoint=records['best_model.pt']['path'])
     dump(EXP / 'protocol.json', p)
     metrics = e['metrics']; rewards = e['reward_components']
@@ -149,7 +159,7 @@ def main():
          protected_files=len(protected),protected_sha256_unchanged=True, existing_checkpoints_unchanged=True,
          source_parity=True,terrain_mesh_assignment_parity=True, max_step_residual=e['max_step_reward_residual'],
          max_episode_residual=e['max_episode_reward_residual'],mean_episode_residual=e['mean_episode_reward_residual']))
-    (OUT / 'files_added.txt').write_text('\n'.join(sorted(str(p.relative_to(ROOT)) for p in OUT.rglob('*') if p.is_file()))+'\n')
+    (OUT / 'files_added.txt').write_text('\n'.join(sorted({str(p.relative_to(ROOT)) for p in OUT.rglob('*') if p.is_file() and 'smoke' not in p.relative_to(OUT).parts} | {str((OUT / 'files_added.txt').relative_to(ROOT))}))+'\n')
     print(json.dumps(t,indent=2)); print(json.dumps(e,indent=2))
 
 

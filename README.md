@@ -5,7 +5,8 @@ representation의 영향을 비교하는 팀 실험 저장소입니다.
 
 - [공통 실험 protocol 및 비교 표](experiments/observation_ablation/README.md)
 - [고정 protocol JSON](experiments/observation_ablation/protocol.json)
-- [HeightScan manifest](experiments/observation_ablation/heightscan/manifest.json)
+- [Canonical HeightScan manifest: 4096×32×1000](experiments/observation_ablation/heightscan_4096x32x1000/manifest.json)
+- [Previous exploratory HeightScan manifest: 2048×32×10000](experiments/observation_ablation/heightscan/manifest.json)
 - [기존 Team1 프로젝트 설명](project.md)
 
 `Ant-rl-Ablation-HeightScan-v0`는 기존 59-D proprio + canonical 63-D HeightScan을 사용합니다.

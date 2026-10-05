@@ -59,4 +59,44 @@ HeightScan feature count differs from depth embedding dimensions and sensor extr
 
 ## Results
 
-Canonical retraining in progress. Base and DepthCam: TBD.
+| Metric | Base | HeightScan | DepthCam |
+|---|---:|---:|---:|
+| Return | TBD | 61.3354 ± 31.2305 | TBD |
+| Displacement (m) | TBD | 60.5140 ± 29.1880 | TBD |
+| Duration (s) | TBD | 12.1947 ± 5.5930 | TBD |
+| Mean vx (m/s) | TBD | 4.4506 ± 1.5331 | TBD |
+| Fall | TBD | 41/100 | TBD |
+| Timeout | TBD | 59/100 | TBD |
+| Other | TBD | 0/100 | TBD |
+| >=5m | TBD | 87/100 | TBD |
+| Out-of-terrain-X | TBD | 28/100 | TBD |
+
+## Stock reward decomposition
+
+| Component | HeightScan mean ± population std |
+|---|---:|
+| progress | 60.4711 ± 29.1633 |
+| alive | 6.0939 ± 2.7998 |
+| upright | 1.0924 ± 0.5508 |
+| move_to_target | 5.3633 ± 2.6815 |
+| action_l2 | -1.2979 ± 8.7617 |
+| energy | -7.2101 ± 3.5063 |
+| joint_pos_limits | -3.1773 ± 1.6496 |
+| total | 61.3354 ± 31.2305 |
+
+## Training-budget sensitivity (diagnostic only)
+
+| Metric | Previous: 2048×32×10000 | Canonical: 4096×32×1000 |
+|---|---:|---:|
+| Transitions | 655,360,000 | 131,072,000 |
+| Selected saved iteration | 4911 | 804 |
+| Return | 63.3921 ± 29.9427 | 61.3354 ± 31.2305 |
+| Displacement | 62.8269 ± 29.5298 | 60.5140 ± 29.1880 |
+| Fall | 35% | 41% |
+| Timeout | 65% | 59% |
+| >=5m | 86% | 87% |
+| Out-of-terrain-X | 27% | 28% |
+
+The new run has five times fewer transitions. This is training-budget sensitivity, not an isolated environment-count effect or the observation-ablation result.
+
+Terrain boundary diagnostic: 28/100 terminal world-X positions outside [-102, 102] m. No boundary or torso-height termination exists; displacement/return can include unsupported movement beyond the map. Raw ray misses retain the canonical clipping to -1.

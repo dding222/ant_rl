@@ -1,5 +1,5 @@
 {
-  "git_commit": "dd35ebc11b01ea57e79cc6dfa03ac6ffcbfac557",
+  "git_commit": "e7a001cf3f68381665efe65ebbcebcf05a3c045c",
   "branch": "observation-ablation",
   "task": "Ant-rl-Ablation-HeightScan-v0",
   "training_env": "Team1 AntEnvCfg",
@@ -110,7 +110,7 @@
     "max_steps": 960,
     "population_std": true
   },
-  "status": "Canonical budget retraining pending; Base/DepthCam compliance pending",
+  "status": "Canonical HeightScan complete; Base/DepthCam matching-budget results pending",
   "runtime_reward_terms": [
     {
       "term": "progress",
@@ -181,7 +181,7 @@
   ],
   "runtime_frozen_config": "shared/source_parity.json",
   "team1_base_commit": "dd35ebc11b01ea57e79cc6dfa03ac6ffcbfac557",
-  "implementation_commit": "9fb0c8720d8823c2057ead34829797231fd8ca2a",
+  "implementation_commit": "e7a001cf3f68381665efe65ebbcebcf05a3c045c",
   "num_steps_per_env": 32,
   "total_transitions": 131072000,
   "canonical_heightscan": "heightscan_4096x32x1000",
@@ -191,5 +191,9 @@
     "num_envs": 2048,
     "iterations": 10000,
     "total_transitions": 655360000
-  }
+  },
+  "runner_config": "ant.agents.ablation_budget_ppo_cfg:AblationBudgetPPORunnerCfg",
+  "canonical_training_command": "python -u scripts/observation_ablation_budget.py train --headless --output logs/rsl_rl/observation_ablation/ablation_heightscan_stock_s42_e4096_n32_i1000",
+  "base_depthcam_compliance": "Pending: require identical budget, shared configs, seeds, reward and selection rule",
+  "canonical_checkpoint": "experiments/observation_ablation/heightscan_4096x32x1000/checkpoints/best_model.pt"
 }
