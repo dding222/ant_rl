@@ -226,6 +226,22 @@ class ObservationsCfg:
     depth: DepthCfg = DepthCfg()
 
 
+def reselect_terrain(env, env_ids):
+    """Move resetting environments to randomly selected terrain patches."""
+    terrain = env.scene.terrain
+
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=env.device)
+
+    num_rows, num_cols = terrain.terrain_origins.shape[:2]
+    terrain_levels = torch.randint(num_rows, (len(env_ids),), device=env.device)
+    terrain_types = torch.randint(num_cols, (len(env_ids),), device=env.device)
+
+    terrain.terrain_levels[env_ids] = terrain_levels
+    terrain.terrain_types[env_ids] = terrain_types
+    terrain.env_origins[env_ids] = terrain.terrain_origins[terrain_levels, terrain_types]
+
+
 def randomize_robot_friction(env, env_ids, asset_cfg, min_fric, max_fric):
     robot = env.scene[asset_cfg.name]
 
@@ -249,6 +265,11 @@ def randomize_robot_friction(env, env_ids, asset_cfg, min_fric, max_fric):
 @configclass
 class EventCfg:
     """Configuration for events."""
+
+    reselect_terrain = EventTerm(
+        func=reselect_terrain,
+        mode="reset",
+    )
 
     reset_base = EventTerm(
         func=mdp.reset_root_state_uniform,

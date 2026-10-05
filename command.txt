@@ -34,7 +34,7 @@ PLAY
 ====
 
 특정 체크포인트 재생:
-python scripts/rsl_rl/play.py --task Ant-rl-v0 --num_envs 4 --checkpoint logs/rsl_rl/ant/RUN_FOLDER/best_model.pt
+python scripts/rsl_rl/play.py --task Ant-rl-v0 --num_envs 4 --checkpoint logs/rsl_rl/ant/
 
 재생 영상 저장 후 종료:
 python scripts/rsl_rl/play.py --task Ant-rl-v0 --num_envs 1 --checkpoint logs/rsl_rl/ant/ --video --video_length 1000 --headless

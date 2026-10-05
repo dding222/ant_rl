@@ -9,11 +9,13 @@
 
 import argparse
 import sys
+from pathlib import Path
 
 from isaaclab.app import AppLauncher
 
 # local imports
 import cli_args  # isort: skip
+import ant  # noqa: F401
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Play one episode with an RL agent from RSL-RL.")
@@ -22,7 +24,9 @@ parser.add_argument("--video_length", type=int, default=200, help="Length of the
 parser.add_argument(
     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
 )
-parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
+parser.add_argument(
+    "--num_envs", "--num_env", dest="num_envs", type=int, default=None, help="Number of environments to simulate."
+)
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument(
     "--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point."
@@ -40,9 +44,8 @@ cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
 args_cli, hydra_args = parser.parse_known_args()
-# always enable cameras to record video
-if args_cli.video:
-    args_cli.enable_cameras = True
+# depth observations always require camera rendering
+args_cli.enable_cameras = True
 
 # clear out sys.argv for Hydra
 sys.argv = [sys.argv[0]] + hydra_args
@@ -67,17 +70,166 @@ from isaaclab.envs import (
     ManagerBasedRLEnvCfg,
     multi_agent_to_single_agent,
 )
+from isaaclab.managers import ObservationGroupCfg as ObsGroup
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.sensors import RayCasterCfg, patterns
+from isaaclab.utils import configclass
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
 from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 
-from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
+from isaaclab_rl.rsl_rl import (
+    RslRlBaseRunnerCfg,
+    RslRlPpoActorCriticCfg,
+    RslRlVecEnvWrapper,
+    export_policy_as_jit,
+    export_policy_as_onnx,
+)
 
 import isaaclab_tasks  # noqa: F401
+import isaaclab_tasks.manager_based.classic.humanoid.mdp as mdp
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
-# PLACEHOLDER: Extension template (do not remove this comment)
+from ant.depth_actor_critic import DepthActorCritic, register_depth_actor_critic
+
+register_depth_actor_critic()
+
+
+#########################
+# Evaluation rewards
+#########################
+
+
+@configclass
+class EvalRewardsCfg:
+    """Original Isaac Lab Ant rewards used for every checkpoint."""
+
+    progress = RewTerm(func=mdp.progress_reward, weight=1.0, params={"target_pos": (1000.0, 0.0, 0.0)})
+    alive = RewTerm(func=mdp.is_alive, weight=0.5)
+    upright = RewTerm(func=mdp.upright_posture_bonus, weight=0.1, params={"threshold": 0.93})
+    move_to_target = RewTerm(
+        func=mdp.move_to_target_bonus,
+        weight=0.5,
+        params={"threshold": 0.8, "target_pos": (1000.0, 0.0, 0.0)},
+    )
+    action_l2 = RewTerm(func=mdp.action_l2, weight=-0.005)
+    energy = RewTerm(func=mdp.power_consumption, weight=-0.05, params={"gear_ratio": {".*": 15.0}})
+    joint_pos_limits = RewTerm(
+        func=mdp.joint_pos_limits_penalty_ratio,
+        weight=-0.1,
+        params={"threshold": 0.99, "gear_ratio": {".*": 15.0}},
+    )
+
+
+#########################
+# Observation adapters
+#########################
+
+
+def foot_contact_state(env, sensor_cfg: SceneEntityCfg, threshold: float) -> torch.Tensor:
+    """Return one binary contact value for each selected foot."""
+    sensor = env.scene.sensors[sensor_cfg.name]
+    forces = sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids]
+    return (forces.norm(dim=-1).amax(dim=1) > threshold).float()
+
+
+@configclass
+class HeightScanContactObservationsCfg:
+    """127-D observations used by the height-scan/contact checkpoint."""
+
+    @configclass
+    class PolicyCfg(ObsGroup):
+        base_height = ObsTerm(func=mdp.base_pos_z)
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
+        base_yaw_roll = ObsTerm(func=mdp.base_yaw_roll)
+        base_angle_to_target = ObsTerm(func=mdp.base_angle_to_target, params={"target_pos": (1000.0, 0.0, 0.0)})
+        base_up_proj = ObsTerm(func=mdp.base_up_proj)
+        base_heading_proj = ObsTerm(func=mdp.base_heading_proj, params={"target_pos": (1000.0, 0.0, 0.0)})
+        joint_pos_norm = ObsTerm(func=mdp.joint_pos_limit_normalized)
+        joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.2)
+        feet_body_forces = ObsTerm(
+            func=mdp.body_incoming_wrench,
+            scale=0.1,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot", body_names=["front_left_foot", "front_right_foot", "left_back_foot", "right_back_foot"]
+                )
+            },
+        )
+        actions = ObsTerm(func=mdp.last_action)
+        height_scan = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("height_scanner"), "offset": 0.5},
+            clip=(-1.0, 1.0),
+        )
+        foot_contacts = ObsTerm(
+            func=foot_contact_state,
+            params={
+                "sensor_cfg": SceneEntityCfg(
+                    "contact_forces",
+                    body_names=["front_left_foot", "front_right_foot", "left_back_foot", "right_back_foot"],
+                    preserve_order=True,
+                ),
+                "threshold": 1.0,
+            },
+        )
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    policy: PolicyCfg = PolicyCfg()
+
+
+def configure_checkpoint_inputs(env_cfg, agent_cfg, checkpoint_path: str) -> str:
+    """Match the observation and policy configuration to a known checkpoint shape."""
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    state_dict = checkpoint["model_state_dict"]
+
+    if any(name.startswith("depth_encoder.") for name in state_dict):
+        return "depth_cnn_123"
+
+    input_dim = state_dict["actor.0.weight"].shape[1]
+    agent_cfg.obs_groups = {}
+    agent_cfg.policy = RslRlPpoActorCriticCfg(
+        init_noise_std=1.0,
+        actor_obs_normalization=False,
+        critic_obs_normalization=False,
+        actor_hidden_dims=[400, 200, 100],
+        critic_hidden_dims=[400, 200, 100],
+        activation="elu",
+    )
+    env_cfg.scene.depth_camera = None
+
+    if input_dim == 127:
+        env_cfg.scene.height_scanner = RayCasterCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/torso",
+            offset=RayCasterCfg.OffsetCfg(pos=(0.8, 0.0, 20.0)),
+            ray_alignment="yaw",
+            pattern_cfg=patterns.GridPatternCfg(resolution=0.2, size=(1.6, 1.2)),
+            mesh_prim_paths=["/World/ground"],
+            max_distance=1.0e6,
+            debug_vis=False,
+        )
+        env_cfg.observations = HeightScanContactObservationsCfg()
+        return "height_scan_contact_127"
+
+    if input_dim == 382:
+        project_root = Path(__file__).resolve().parents[2]
+        sys.path.insert(0, str(project_root / "IsaacLab_Ant"))
+        from ant_rough.env_cfg import MySceneCfg as RoughSceneCfg
+        from ant_rough.env_cfg import ObservationsCfg as RoughObservationsCfg
+
+        env_cfg.scene.height_scanner = RoughSceneCfg().height_scanner
+        env_cfg.scene.height_scanner.update_period = env_cfg.decimation * env_cfg.sim.dt
+        env_cfg.observations = RoughObservationsCfg()
+        return "height_scan_382"
+
+    raise ValueError(f"Unsupported checkpoint observation size: {input_dim}")
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
@@ -114,6 +266,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # set the log directory for the environment (works for all environment types)
     env_cfg.log_dir = log_dir
+
+    policy_input = configure_checkpoint_inputs(env_cfg, agent_cfg, resume_path)
+    env_cfg.rewards = EvalRewardsCfg()
+    print(f"[INFO] Checkpoint input adapter: {policy_input}")
 
     # configure the viewer to track the Ant root
     env_cfg.viewer.origin_type = "asset_root"
@@ -175,16 +331,23 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         normalizer = None
 
     # export policy to onnx/jit
-    export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
-    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+    if isinstance(policy_nn, DepthActorCritic):
+        print("[INFO] Skipping JIT/ONNX export for the multimodal depth policy.")
+    else:
+        export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+        export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
+        export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
 
     dt = env.unwrapped.step_dt
 
     # reset environment
     obs = env.get_observations()
     timestep = 0
+    reward_names = env.unwrapped.reward_manager.active_terms
     episode_rewards = torch.zeros(env.num_envs, dtype=torch.float64, device=env.device)
+    episode_reward_components = torch.zeros(
+        (env.num_envs, len(reward_names)), dtype=torch.float64, device=env.device
+    )
     episode_steps = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
     finished = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
     # simulate environment
@@ -199,6 +362,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             # Include the terminal step, then ignore auto-reset episodes for finished environments.
             active = ~finished
             episode_rewards[active] += rewards[active]
+            step_reward_components = env.unwrapped.reward_manager._step_reward.double() * env.unwrapped.step_dt
+            episode_reward_components[active] += step_reward_components[active]
             episode_steps[active] += 1
             finished |= dones.bool()
         timestep += 1
@@ -222,6 +387,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     print(f"[INFO] Completed first episodes: {completed}/{env.num_envs}")
     if completed != env.num_envs:
         print("[INFO] Statistics include partial episodes for unfinished environments.")
+    print("[RESULT] Reward component means:")
+    for index, name in enumerate(reward_names):
+        values = episode_reward_components[:, index]
+        print(f"[RESULT] {name}: mean={values.mean().item():.6f}, std={values.std(unbiased=False).item():.6f}")
+    component_sum_error = (episode_reward_components.sum(dim=1) - episode_rewards).abs().max().item()
+    print(f"[RESULT] Reward component sum max error: {component_sum_error:.8f}")
     if env.num_envs == 1:
         print(f"[RESULT] Episode reward total: {episode_rewards[0].item():.6f}")
         print(f"[RESULT] Episode steps: {episode_steps[0].item()}")

@@ -72,6 +72,8 @@ ant/
 - 경사도: `0.0 ~ 0.20`
 - 중앙 platform 폭: `1.0 m`
 
+Terrain geometry는 학습 시작 시 한 번 생성된다. 각 environment가 episode reset될 때마다 `20 x 10` patch 중 하나를 무작위로 다시 선택하고, 변경된 terrain origin에서 Ant를 reset한다.
+
 주의: 초기 목표였던 **사각 높이 타일 한 종류만 사용하는 고정 terrain**과 현재 코드는 다르다. 현재는 계단, 역계단, 경사, 역경사, boxes가 섞인 rough terrain이다. 이것이 최종 실험 조건인지 다시 결정해야 한다.
 
 ### 마찰계수
@@ -195,6 +197,7 @@ Episode_Reward/foot_slip
 
 ### Reset
 
+- episode가 끝난 environment는 기존 200개 terrain patch 중 하나를 무작위로 다시 선택
 - root pose/velocity의 추가 randomization 없음
 - joint position offset: `-0.2 ~ 0.2`
 - joint velocity offset: `-0.1 ~ 0.1`
@@ -318,6 +321,7 @@ tensorboard --logdir logs/rsl_rl/ant --port 6006
 - [x] `Ant-rl-v0` custom task 등록
 - [x] `ManagerBasedRLEnv + RSL-RL PPO` 학습 구조 정리
 - [x] robot friction environment별 randomization
+- [x] episode reset마다 terrain patch 무작위 재선택
 - [x] reward 계산을 `TotalReward` 하나로 통합
 - [x] progress potential reset 동작 유지
 - [x] contact reward와 foot-slip penalty 추가

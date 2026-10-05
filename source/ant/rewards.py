@@ -15,17 +15,31 @@ if TYPE_CHECKING:
 # Reward weights
 #########################
 
-PROGRESS_WEIGHT = 2.5
-ALIVE_WEIGHT = 0.5
-UPRIGHT_WEIGHT = 0.05
-HEADING_WEIGHT = 1.5
-CONTACT_WEIGHT = 1.0
+FINAL_REWARD_WEIGHTS = {
+    "progress": 2.5,
+    "alive": 0.5,
+    "upright": 0.05,
+    "move_to_target": 1.5,
+    "foot_contact": 1.0,
+    "action_l2": -0.005,
+    "energy": -0.15,
+    "joint_velocity": -0.001,
+    "joint_pos_limits": -0.5,
+    "foot_slip": -0.07,
+}
 
-ACTION_WEIGHT = -0.005
-ENERGY_WEIGHT = -0.15
-JOINT_VEL_WEIGHT = -0.001
-JOINT_LIMIT_WEIGHT = -0.5
-FOOT_SLIP_WEIGHT = -0.07
+BASIC_REWARD_WEIGHTS = {
+    "progress": 1.0,
+    "alive": 0.5,
+    "upright": 0.1,
+    "move_to_target": 0.5,
+    "action_l2": -0.005,
+    "energy": -0.05,
+    "joint_pos_limits": -0.1,
+}
+
+ACTIVE_REWARD_WEIGHTS = FINAL_REWARD_WEIGHTS
+# ACTIVE_REWARD_WEIGHTS = BASIC_REWARD_WEIGHTS
 
 #########################
 # Contact parameter
@@ -54,16 +68,7 @@ class TotalReward(ManagerTermBase):
         self.foot_names = contact_sensor.body_names
         self.foot_body_ids, _ = robot.find_bodies(contact_sensor.body_names, preserve_order=True)
         self.episode_sums = {
-            "progress": torch.zeros(env.num_envs, device=env.device),
-            "alive": torch.zeros(env.num_envs, device=env.device),
-            "upright": torch.zeros(env.num_envs, device=env.device),
-            "move_to_target": torch.zeros(env.num_envs, device=env.device),
-            "foot_contact": torch.zeros(env.num_envs, device=env.device),
-            "action_l2": torch.zeros(env.num_envs, device=env.device),
-            "energy": torch.zeros(env.num_envs, device=env.device),
-            "joint_pos_limits": torch.zeros(env.num_envs, device=env.device),
-            "joint_velocity": torch.zeros(env.num_envs, device=env.device),
-            "foot_slip": torch.zeros(env.num_envs, device=env.device),
+            name: torch.zeros(env.num_envs, device=env.device) for name in ACTIVE_REWARD_WEIGHTS
         }
 
         gear_ratio = torch.full((env.num_envs, robot.num_joints), 15.0, device=env.device)
@@ -201,17 +206,20 @@ class TotalReward(ManagerTermBase):
         # Total reward
         #########################
 
+        reward_values = {
+            "progress": progress_reward,
+            "alive": alive_reward,
+            "upright": upright_reward,
+            "move_to_target": heading_reward,
+            "foot_contact": contact_reward,
+            "action_l2": action_penalty,
+            "energy": energy_penalty,
+            "joint_velocity": vel_penalty,
+            "joint_pos_limits": joint_limit_penalty,
+            "foot_slip": foot_slip_penalty,
+        }
         weighted_rewards = {
-            "progress": PROGRESS_WEIGHT * progress_reward,
-            "alive": ALIVE_WEIGHT * alive_reward,
-            "upright": UPRIGHT_WEIGHT * upright_reward,
-            "move_to_target": HEADING_WEIGHT * heading_reward,
-            "foot_contact": CONTACT_WEIGHT * contact_reward,
-            "action_l2": ACTION_WEIGHT * action_penalty,
-            "energy": ENERGY_WEIGHT * energy_penalty,
-            "joint_velocity": JOINT_VEL_WEIGHT * vel_penalty,
-            "joint_pos_limits": JOINT_LIMIT_WEIGHT * joint_limit_penalty,
-            "foot_slip": FOOT_SLIP_WEIGHT * foot_slip_penalty,
+            name: weight * reward_values[name] for name, weight in ACTIVE_REWARD_WEIGHTS.items()
         }
 
         for name, reward in weighted_rewards.items():
