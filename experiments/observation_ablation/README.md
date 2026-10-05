@@ -21,9 +21,7 @@ Stage 1은 terrain representation을 비교하는 기본 조건이다. Stage 2�
 
 > **비교 원칙:** Stage 1과 Stage 2는 reward 구성과 scale이 다르므로 total return 값의 차이를 직접적인 성능 향상량으로 해석하지 않는다. 같은 Stage 안에서는 학습 환경, PPO, seed, training budget, reward, 평가 조건을 동일하게 맞춘 뒤 HeightScan과 DepthCam을 비교한다.
 
-## 공통 학습 조건
-
-다음 조건은 두 stage에 공통으로 적용한다. DepthCam 실험도 동일한 학습·평가 조건을 사용한다.
+### 공통 환경 설정
 
 | 항목 | 설정 |
 |---|---|
@@ -31,19 +29,27 @@ Stage 1은 terrain representation을 비교하는 기본 조건이다. Stage 2�
 | Terrain 종류 | 5종, 각 proportion 0.2 (20%) |
 | Terrain 배치 | 20 × 10 patches |
 | Patch 크기 | 10 × 10 m |
-| Training seed | 42 |
-| Terrain seed | 42 |
-| 병렬 환경 수 | 4096 |
-| 환경별 iteration당 rollout steps | 32 |
-| 학습 iterations | 1000 |
-| 총 transitions | 131,072,000 |
-| Physics dt | 1/120 s |
-| Control dt | 1/60 s |
-| Episode 길이 | 16 s / 960 steps |
-| Action | 8-D joint effort |
-| Action scale | 7.5 |
-| Actor/Critic post-feature MLP | [400, 200, 100], ELU |
-| Resume | 사용 안 함 |
+
+## 공통 학습 조건
+
+다음 조건은 HeightScan과 DepthCam 실험에 공통으로 적용한다.  
+두 representation은 메모리 사용량 차이로 인해 병렬 환경 수와 학습 iteration 수는 다르지만, **총 training transitions는 131,072,000으로 동일하게 맞췄다.**
+
+| 항목 | HeightScan | DepthCam |
+|---|---:|---:|
+| 병렬 환경 수 | 4096 | 2048 |
+| 환경별 iteration당 rollout steps | 32 | 32 |
+| 학습 iterations | 1000 | 2000 |
+| 총 transitions | 131,072,000 | 131,072,000 |
+| Training seed | 42 | 42 |
+| Terrain seed | 42 | 42 |
+| Physics dt | 1/120 s | 1/120 s |
+| Control dt | 1/60 s | 1/60 s |
+| Episode 길이 | 16 s / 960 steps | 16 s / 960 steps |
+| Action | 8-D joint effort | 8-D joint effort |
+| Action scale | 7.5 | 7.5 |
+| Actor/Critic post-feature MLP | [400, 200, 100], ELU | [400, 200, 100], ELU |
+| Resume | 사용 안 함 | 사용 안 함 |
 
 ### Terrain 구성
 
