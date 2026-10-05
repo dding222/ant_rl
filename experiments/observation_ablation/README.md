@@ -1,5 +1,7 @@
 # Observation Ablation
 
+## Stage 1 — Stock Reward
+
 ## Research question
 
 Compare Base / HeightScan / DepthCam terrain representation under identical Team1 training/evaluation environments, stock rewards, PPO, seeds and training budget.
@@ -100,3 +102,7 @@ HeightScan feature count differs from depth embedding dimensions and sensor extr
 The new run has five times fewer transitions. This is training-budget sensitivity, not an isolated environment-count effect or the observation-ablation result.
 
 Terrain boundary diagnostic: 28/100 terminal world-X positions outside [-102, 102] m. No boundary or torso-height termination exists; displacement/return can include unsupported movement beyond the map. Raw ray misses retain the canonical clipping to -1.
+
+## Stage 2 — Contact + Modified Reward
+
+HeightScan arm pending smoke/training/evaluation. DepthCam arm TBD. Shared protocol: `shared/stage2_contact_modified_protocol.json`.
