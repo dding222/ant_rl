@@ -113,7 +113,7 @@
     "max_steps": 960,
     "population_std": true
   },
-  "status": "HeightScan complete; DepthCam Stage 2 arm TBD",
+  "status": "HeightScan and DepthCam evaluations complete with documented observation and terrain-reset differences",
   "runtime_frozen_config": "heightscan_contact_modified_4096x32x1000/results/source_parity.json",
   "team1_base_commit": "dd35ebc11b01ea57e79cc6dfa03ac6ffcbfac557",
   "num_steps_per_env": 32,
@@ -121,7 +121,8 @@
   "canonical_heightscan": "heightscan_contact_modified_4096x32x1000",
   "resume": false,
   "runner_config": "ant.agents.stage2_ppo_cfg:Stage2HeightScanContactPPORunnerCfg",
-  "base_depthcam_compliance": "DepthCam Stage 2 must match all shared settings; representation and sensor-specific encoder only may differ",
+  "base_depthcam_compliance": "DepthCam matches budget, seeds, PPO, modified reward and evaluation protocol, but has no separate 4-D binary contact observation and used reset-time terrain reselection during training",
+  "depthcam_evaluation": "../depthcam_modified_2048x32x2000/results/evaluation_summary.json",
   "stage": 2,
   "training_reward": {
     "progress": 2.5,
