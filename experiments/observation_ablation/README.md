@@ -1,15 +1,14 @@
 # Terrain Observation Ablation: HeightScan vs DepthCam
 
-Team1 terrain/environment에서 PPO, seed, training budget을 통일해 HeightScan과 DepthCam의 terrain representation을 비교한다. Stock Reward와 Contact + Modified Reward의 두 조건에서 각각 Ant locomotion 성능을 평가한다.
+본 프로젝트는 `Isaac-Ant-v0`를 기반으로, 복잡한 지형에서도 주변 terrain 정보를 활용해 안정적으로 이동할 수 있는 PPO policy를 개발하고 비교하는 것을 목표로 한다. Robot 구조와 기본 control framework는 유지하면서, terrain perception 방식과 observation 구성, reward 설계를 단계적으로 변경하였다.
+
+특히 terrain 정보를 직접 높이값으로 제공하는 HeightScan과 depth image를 CNN으로 처리하는 DepthCam을 비교하여, 서로 다른 terrain representation이 Ant locomotion에 미치는 영향을 분석하고자 한다. 비교의 공정성을 위해 동일한 terrain/environment, PPO 설정, seed, training budget을 공통 기준으로 고정하였다. Stage 1에서는 Stock Reward 조건에서 두 perception 방식을 비교하고, Stage 2에서는 동일한 Contact observation + Modified Reward 조건에서도 비교를 반복하도록 실험을 구성하였다.
+
+Modified Reward는 단순한 전진 보상 위주의 학습에서 반복적인 jumping/hopping 형태의 이동이 나타나는 경향을 완화하고, ground contact, foot slip, joint motion, control effort를 함께 고려하도록 reward objective를 확장하기 위해 도입하였다. 각 조건에서는 return뿐 아니라 displacement, episode duration, fall/timeout, reward decomposition을 함께 기록해 locomotion 특성을 분석한다. 현재 HeightScan arm의 학습과 평가는 완료했으며, DepthCam 결과는 동일한 protocol의 실험이 완료되면 추가한다.
 
 ## 연구 목적
 
-동일한 terrain, PPO, training budget, seed 조건에서 HeightScan과 DepthCam 중 어떤 terrain representation이 Ant locomotion에 더 효과적인지 확인한다.
-
-이 질문을 다음 두 조건에서 각각 검토한다.
-
-1. **Stock Reward 조건** — HeightScan vs DepthCam.
-2. **Contact + Modified Reward 조건** — HeightScan + Contact vs DepthCam + Contact.
+본 실험의 핵심 질문은 같은 학습 조건에서 HeightScan과 DepthCam 중 어떤 terrain representation이 Ant locomotion에 더 효과적인가이다. 이를 Stock Reward 조건과 Contact + Modified Reward 조건에서 각각 비교한다.
 
 ## 전체 실험 구성
 
