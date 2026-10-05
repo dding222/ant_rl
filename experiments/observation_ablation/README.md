@@ -17,18 +17,18 @@ Modified Reward는 단순한 전진 보상 위주의 학습에서 반복적인 j
 | Stage 1 | HeightScan | DepthCam | Stock Isaac-Ant reward |
 | Stage 2 | HeightScan + Contact | DepthCam + Contact | Modified reward |
 
-Stage 1은 terrain representation을 비교하는 기본 조건이다. Stage 2에서는 두 조건에 동일한 explicit Contact observation과 Modified Reward를 적용한 뒤 비교를 반복한다. 각 stage에서 비교하려는 변수는 terrain representation이며, 센서별 encoder 차이는 허용한다.
+Stage 1은 terrain representation을 비교하는 기본 조건이다. Stage 2에서는 두 조건에 동일한 explicit Contact observation과 Modified Reward를 적용한 뒤 비교를 반복한다. 각 Stage에서는 HeightScan과 DepthCam의 terrain perception 방식 차이를 비교한다. 두 센서는 입력 형태가 다르므로 전처리 및 feature encoder 구조는 각 센서에 맞게 사용하되, 그 외 학습 환경, PPO, seed, training budget은 동일하게 유지한다.
 
-> **비교 원칙:** Stage 1과 Stage 2는 reward 구성과 scale이 다르므로 total return 값의 차이를 직접적인 성능 향상량으로 해석하지 않는다. 공통 protocol이 일치하는지 확인한 뒤 **같은 stage 안에서** HeightScan과 DepthCam을 비교한다. Stage 간 물리적 지표는 참고할 수 있지만, 이 실험만으로 Contact와 reward 변경의 개별 효과를 분리할 수는 없다.
+> **비교 원칙:** Stage 1과 Stage 2는 reward 구성과 scale이 다르므로 total return 값의 차이를 직접적인 성능 향상량으로 해석하지 않는다. 같은 Stage 안에서는 학습 환경, PPO, seed, training budget, reward, 평가 조건을 동일하게 맞춘 뒤 HeightScan과 DepthCam을 비교한다.
 
 ## 공통 학습 조건
 
-다음 조건은 두 stage에 공통으로 적용한다. 진행 예정인 DepthCam 실험도 동일한 protocol을 따라야 한다.
+다음 조건은 두 stage에 공통으로 적용한다. DepthCam 실험도 동일한 학습·평가 조건을 사용한다.
 
 | 항목 | 설정 |
 |---|---|
-| 학습 환경 | Team1 rough terrain |
-| Terrain 종류 | 5종, 각 비율 0.2 |
+| 학습 환경 | Stairs, inverted stairs, boxes, slope, inverted slope로 구성한 terrain |
+| Terrain 종류 | 5종, 각 proportion 0.2 (20%) |
 | Terrain 배치 | 20 × 10 patches |
 | Patch 크기 | 10 × 10 m |
 | Training seed | 42 |
@@ -45,7 +45,21 @@ Stage 1은 terrain representation을 비교하는 기본 조건이다. Stage 2�
 | Actor/Critic post-feature MLP | [400, 200, 100], ELU |
 | Resume | 사용 안 함 |
 
-기존 Team1 root reset을 유지하며, joint position은 ±0.2, joint velocity는 ±0.1 범위로 초기화한다. 종료 조건은 timeout 또는 `body_z_down(pi/2)`이며, map boundary나 torso height에 따른 종료 조건은 추가하지 않는다.
+### Terrain 구성
+
+현재 [terrain 설정](../../source/ant/ant_env_cfg.py)과 두 HeightScan 실험의 저장 config에서 확인한 parameter는 다음과 같다. Terrain layout은 **20 × 10 patches**, 각 patch는 **10 × 10 m**, terrain seed는 **42**이다.
+
+| Terrain | Config key | Proportion | Parameter 범위 / 크기 | Platform width |
+|---|---|---:|---|---:|
+| Stairs | `pyramid_stairs` | 0.2 (20%) | Step height: 0.03–0.07 m, step width: 0.3 m | 1.0 m |
+| Inverted stairs | `pyramid_stairs_inv` | 0.2 (20%) | Step height: 0.03–0.07 m, step width: 0.3 m | 1.0 m |
+| Boxes | `boxes` | 0.2 (20%) | Grid width: 0.45 m, `grid_height_range`: 0.02–0.10 m | 1.0 m |
+| Slope | `hf_pyramid_slope` | 0.2 (20%) | `slope_range`: 0.0–0.20, `inverted=False` | 1.0 m |
+| Inverted slope | `hf_pyramid_slope_inv` | 0.2 (20%) | `slope_range`: 0.0–0.20, `inverted=True` | 1.0 m |
+
+`slope_range`는 각도가 아닌 높이 변화량과 수평 거리의 비율이며, inverted slope에는 반대 방향의 기울기를 적용한다. `random_rough`는 proportion이 0.0이므로 생성 대상에서 제외된다.
+
+초기화는 공통 환경 설정을 유지하며, joint position은 ±0.2, joint velocity는 ±0.1 범위로 초기화한다. 종료 조건은 timeout 또는 `body_z_down(pi/2)`이며, map boundary나 torso height에 따른 종료 조건은 추가하지 않는다.
 
 완료된 두 HeightScan 실험의 PPO 설정은 동일하다. Learning rate는 0.0005 (adaptive), gamma는 0.99, lambda는 0.95, clip은 0.2, entropy coefficient는 0, value-loss coefficient는 1이다. Clipped value loss를 사용하며, 5 epochs, 4 minibatches, desired KL 0.01, max gradient norm 1로 설정했다. 초기 Gaussian noise std는 1이며 actor/critic observation normalization은 사용하지 않는다.
 
@@ -55,7 +69,7 @@ Checkpoint 선택 규칙은 학습 전에 고정한다. 해당 stage의 training
 
 | 항목 | 설정 |
 |---|---|
-| 평가 환경 | 동일한 Team1 terrain 설정 |
+| 평가 환경 | 위와 동일한 terrain 구성 및 환경 설정 |
 | Evaluation seed | 24 |
 | 평가 환경 수 | 100 |
 | Policy action | Deterministic mean action |
