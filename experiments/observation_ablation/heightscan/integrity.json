@@ -1,0 +1,13 @@
+{
+  "phase": "source + smoke",
+  "protected_files": 303,
+  "protected_sha256_unchanged": true,
+  "existing_checkpoints_unchanged": true,
+  "py_compile": true,
+  "git_diff_check": true,
+  "json_parse": true,
+  "runtime_finite": true,
+  "smoke_pass": true,
+  "training_complete": false,
+  "evaluation_complete": false
+}
