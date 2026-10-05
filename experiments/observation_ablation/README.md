@@ -90,20 +90,33 @@ Terrain mesh SHA256 and row/column/origin assignment are saved for future parity
 
 ## Results
 
-Pending runtime validation, training and evaluation. TBD is not a measured zero.
+HeightScan training and 100-env first-episode evaluation are complete. Base and DepthCam remain TBD.
 
 | Metric | Base | HeightScan | DepthCam |
 |---|---:|---:|---:|
-| Return mean ± population std | TBD | TBD | TBD |
-| Displacement mean ± population std | TBD | TBD | TBD |
-| Fall | TBD | TBD | TBD |
-| Timeout | TBD | TBD | TBD |
+| Return mean ± population std | TBD | 63.392055 ± 29.942694 | TBD |
+| Displacement mean ± population std | TBD | 62.826890 ± 29.529847 | TBD |
+| Fall | TBD | 35/100 (35%) | TBD |
+| Timeout | TBD | 65/100 (65%) | TBD |
 
 ## Reward decomposition
 
 Actual RewardManager contributions are `_step_reward * step_dt` (raw × weight × dt).
 Seven components and official total are accumulated in float64 through the terminal step;
-episode residual tolerance=1e-3, per-step tolerance=1e-5. Component statistics are TBD.
+episode residual tolerance=1e-3, per-step tolerance=1e-5.
+
+| Component | Base | HeightScan mean ± population std | DepthCam |
+|---|---:|---:|---:|
+| progress | TBD | 62.771216 ± 29.495106 | TBD |
+| alive | TBD | 6.393084 ± 2.800694 | TBD |
+| upright | TBD | 1.138617 ± 0.558899 | TBD |
+| move_to_target | TBD | 5.514685 ± 2.782825 | TBD |
+| action_l2 | TBD | -0.754004 ± 1.900572 | TBD |
+| energy | TBD | -8.106779 ± 3.881595 | TBD |
+| joint_pos_limits | TBD | -3.564762 ± 1.875774 | TBD |
+| total | TBD | 63.392055 ± 29.942694 | TBD |
+
+Max step residual=3.67e-08; max episode residual=2.28e-06.
 
 ## Reproduce and extend
 
@@ -114,8 +127,10 @@ future Base/DepthCam implementations must match them and the evaluation terrain 
 Use `AblationBaseCfg` as the common foundation, replacing sensor/observation and the sensor encoder only.
 No Base or DepthCam training is part of this change.
 
-Checkpoints and training TensorBoard logs remain under ignored `logs/rsl_rl/observation_ablation/`.
-Compact config, CSV and JSON results are tracked; checkpoints, videos and step-level CSV are excluded.
+Training checkpoints and TensorBoard logs remain under ignored `logs/rsl_rl/observation_ablation/`.
+The selected checkpoint alone is tracked as `heightscan/checkpoints/best_model.pt`
+(3,619,381 bytes, approximately 3.5 MiB); this repository has no LFS policy.
+Compact config, CSV and JSON results are tracked; intermediate checkpoints, videos and step-level CSV are excluded.
 
 ## Caveats
 
@@ -128,3 +143,7 @@ because this repository relies on the external IsaacLab_RS checkout.
 All variants use the same environment, stock 7-term reward, PPO configuration, seeds, and evaluation protocol;
 only the terrain observation representation differs. This is the required protocol, not a claim that the
 pending Base/DepthCam runs have already satisfied it.
+
+Selected checkpoint: `logs/rsl_rl/observation_ablation/ablation_heightscan_stock_s42/best_model.pt`; saved iteration=4911; SHA256=`ffd81a6826d674ba88f920c8a7f57464adbec96d140a5199e904b90c72beab7b`.
+
+Observed terrain-boundary caveat: 27/100 terminal world-X positions lie outside the configured terrain mesh X extent [-102, 102] m. Raw ray misses=427089 (8.83% of active ray samples), mapped to -1 by the unchanged canonical clip. Team1 has no map-boundary or torso-height termination; large displacement/return therefore includes movement beyond the bounded map and must not be interpreted as entirely supported terrain locomotion. These dynamics/terminations were preserved for parity.

@@ -110,7 +110,7 @@
     "max_steps": 960,
     "population_std": true
   },
-  "status": "smoke PASS; training preregistered, pending",
+  "status": "HeightScan complete; Base and DepthCam stock-reward experiments pending",
   "runtime_reward_terms": [
     {
       "term": "progress",
@@ -179,5 +179,7 @@
       }
     }
   ],
-  "runtime_frozen_config": "shared/source_parity.json"
+  "runtime_frozen_config": "shared/source_parity.json",
+  "team1_base_commit": "dd35ebc11b01ea57e79cc6dfa03ac6ffcbfac557",
+  "implementation_commit": "9fb0c8720d8823c2057ead34829797231fd8ca2a"
 }

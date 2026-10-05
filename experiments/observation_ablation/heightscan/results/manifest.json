@@ -6,7 +6,7 @@
   "training_seed": 42,
   "evaluation_seed": 24,
   "terrain_seed": 42,
-  "num_envs": 4,
+  "num_envs": 100,
   "training_num_envs": 2048,
   "evaluation_num_envs": 100,
   "iterations": 10000,
@@ -182,44 +182,98 @@
     {
       "env_id": 1,
       "terrain_row": 3,
-      "terrain_column": 2,
+      "terrain_column": 0,
       "origin": [
         -65.0,
-        -25.0,
-        0.4399999976158142
+        -45.0,
+        0.375
       ],
-      "scan_min": -2.4437904357910156e-06,
-      "scan_max": 0.11999839544296265,
-      "scan_mean": 0.03285593539476395
+      "scan_min": 0.0,
+      "scan_max": 0.10000038146972656,
+      "scan_mean": 0.027698125690221786
     },
     {
       "env_id": 2,
       "terrain_row": 8,
-      "terrain_column": 4,
+      "terrain_column": 0,
       "origin": [
         -15.0,
-        -5.0,
-        -1.1579716205596924
+        -45.0,
+        1.1328880786895752
       ],
-      "scan_min": -0.34058117866516113,
-      "scan_max": 7.152557373046875e-07,
-      "scan_mean": -0.1946176141500473
+      "scan_min": -7.152557373046875e-07,
+      "scan_max": 0.33320164680480957,
+      "scan_mean": 0.1703035831451416
     },
     {
       "env_id": 3,
       "terrain_row": 10,
-      "terrain_column": 7,
+      "terrain_column": 0,
       "origin": [
         5.0,
-        25.0,
-        0.5899999737739563
+        -45.0,
+        0.7749999761581421
       ],
-      "scan_min": -2.1457672119140625e-06,
-      "scan_max": 0.15999960899353027,
-      "scan_mean": 0.0444442555308342
+      "scan_min": -1.5497207641601562e-06,
+      "scan_max": 0.2099994421005249,
+      "scan_mean": 0.05761875584721565
+    },
+    {
+      "env_id": 4,
+      "terrain_row": 4,
+      "terrain_column": 0,
+      "origin": [
+        -55.0,
+        -45.0,
+        0.32499998807907104
+      ],
+      "scan_min": -7.748603820800781e-07,
+      "scan_max": 0.08999937772750854,
+      "scan_mean": 0.025793088600039482
+    },
+    {
+      "env_id": 5,
+      "terrain_row": 10,
+      "terrain_column": 0,
+      "origin": [
+        5.0,
+        -45.0,
+        0.7749999761581421
+      ],
+      "scan_min": -1.5497207641601562e-06,
+      "scan_max": 0.2099994421005249,
+      "scan_mean": 0.05761875584721565
+    },
+    {
+      "env_id": 6,
+      "terrain_row": 11,
+      "terrain_column": 0,
+      "origin": [
+        15.0,
+        -45.0,
+        -0.8422371745109558
+      ],
+      "scan_min": -0.24771660566329956,
+      "scan_max": 2.980232238769531e-07,
+      "scan_mean": -0.14155222475528717
+    },
+    {
+      "env_id": 7,
+      "terrain_row": 4,
+      "terrain_column": 0,
+      "origin": [
+        -55.0,
+        -45.0,
+        0.32499998807907104
+      ],
+      "scan_min": -7.748603820800781e-07,
+      "scan_max": 0.08999937772750854,
+      "scan_mean": 0.025793088600039482
     }
   ],
   "evaluation_protocol": "100 envs, seed24, deterministic mean actions, first episode only, terminal step included",
   "fall_semantics": "body_z_down: bad_orientation(pi/2), no torso height termination",
-  "reward_contribution": "RewardManager._step_reward * actual step_dt = raw * weight * dt"
+  "reward_contribution": "RewardManager._step_reward * actual step_dt = raw * weight * dt",
+  "checkpoint": "logs/rsl_rl/observation_ablation/ablation_heightscan_stock_s42/best_model.pt",
+  "checkpoint_sha256": "ffd81a6826d674ba88f920c8a7f57464adbec96d140a5199e904b90c72beab7b"
 }

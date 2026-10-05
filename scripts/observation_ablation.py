@@ -259,16 +259,24 @@ def main():
     max_error = 0.0
     previous_scan = scan.clone()
     changed = False
+    missing_hit_samples = 0
     limit = 32 if args.mode == "smoke" else base.max_episode_length
     for step in range(limit):
         assert app.is_running()
         with torch.inference_mode():
             assert obs["policy"].shape == (n, 122) and torch.isfinite(obs["policy"]).all()
+            missing_hit_samples += int(torch.isinf(sensor.data.ray_hits_w[~done]).any(-1).sum())
             action = model(obs) if model else torch.zeros((n, 8), device=base.device)
             assert action.shape == (n, 8) and torch.isfinite(action).all()
             obs, reward, dones, _ = env.step(action)
             assert torch.isfinite(reward).all() and torch.isfinite(obs["policy"]).all()
-            assert torch.isfinite(sensor.data.ray_hits_w).all()
+            if args.mode == "smoke":
+                assert torch.isfinite(sensor.data.ray_hits_w).all()
+            else:
+                # Native RayCaster uses Inf for a missed static-mesh ray. The
+                # canonical height_scan clip maps it to -1; do not change the
+                # terrain or the representation to satisfy a raw-data check.
+                assert not torch.isnan(sensor.data.ray_hits_w).any()
             contribution = base.reward_manager._step_reward * dt
             assert torch.isfinite(contribution).all()
             active = ~done
@@ -324,6 +332,9 @@ def main():
              max_step_reward_residual=max_error, max_episode_reward_residual=float(residual.max()),
              finite=True, first_episode_only=True, terminal_step_included=True, post_reset_rewards_excluded=True,
              terrain_mesh_sha256=mesh_sha, simultaneous_fall_timeout_count=int((fall&timeout).sum())))
+        dump("raycast_diagnostics.json", dict(raw_missing_ray_samples=missing_hit_samples,
+             interpretation="Inf raw hit = no mesh intersection; canonical height_scan clip maps to -1",
+             processed_observations_finite=True, raw_nan=False))
     env.close()
 
 
