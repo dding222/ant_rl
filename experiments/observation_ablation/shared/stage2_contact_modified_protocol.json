@@ -113,8 +113,8 @@
     "max_steps": 960,
     "population_std": true
   },
-  "status": "HeightScan smoke/training pending; DepthCam arm TBD",
-  "runtime_frozen_config": "shared/source_parity.json",
+  "status": "HeightScan complete; DepthCam Stage 2 arm TBD",
+  "runtime_frozen_config": "heightscan_contact_modified_4096x32x1000/results/source_parity.json",
   "team1_base_commit": "dd35ebc11b01ea57e79cc6dfa03ac6ffcbfac557",
   "num_steps_per_env": 32,
   "total_transitions": 131072000,
@@ -193,5 +193,7 @@
     "threshold_N": 5.0,
     "condition": ">5N; foot_contact bonus if at least two feet; foot_slip sums contacted feet XY speeds"
   },
-  "intended_comparison_variable": "terrain representation (HeightScan vs DepthCam)"
+  "intended_comparison_variable": "terrain representation (HeightScan vs DepthCam)",
+  "implementation_commit": "e74d3fe5f08b3f070ff314e6f0b6349985458b61",
+  "heightscan_checkpoint": "experiments/observation_ablation/heightscan_contact_modified_4096x32x1000/checkpoints/best_model.pt"
 }

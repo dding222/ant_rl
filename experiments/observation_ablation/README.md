@@ -105,4 +105,50 @@ Terrain boundary diagnostic: 28/100 terminal world-X positions outside [-102, 10
 
 ## Stage 2 — Contact + Modified Reward
 
-HeightScan arm pending smoke/training/evaluation. DepthCam arm TBD. Shared protocol: `shared/stage2_contact_modified_protocol.json`.
+This is the HeightScan terrain-representation arm under the Contact + Modified Reward condition. DepthCam is TBD until the teammate arm is merged; this work trains only HeightScan.
+
+Both arms must use the same Team1 environment, explicit 4-D contact definition, Team1 v3_depth modified reward for both training and evaluation, PPO, post-feature [400,200,100] ELU actor/critic, 4096×32×1000 budget (131,072,000 transitions), training/terrain seed42, checkpoint-selection rule, and seed24/100-env deterministic first-episode evaluation. The intended comparison variable is HeightScan vs DepthCam terrain representation. Sensor-specific depth encoders and resulting input dimensions may differ.
+
+Shared machine-readable protocol: [shared/stage2_contact_modified_protocol.json](shared/stage2_contact_modified_protocol.json). Contact spec: [shared/contact_observation.json](shared/contact_observation.json). Result manifest: [heightscan_contact_modified_4096x32x1000/manifest.json](heightscan_contact_modified_4096x32x1000/manifest.json).
+
+HeightScan and contact observation are adapted from the existing IsaacLab_RS Assignment 1 HeightScan+Contact implementation. Observation order is Team1 proprio59, unchanged scan63, then contact4 (126-D). No CNN, dummy feature or empirical normalization. Observation contact uses current net-force norm >1N, ordered front_left_foot/front_right_foot/left_back_foot/right_back_foot, float32 binary states, history0, no clipping or scaling change.
+
+Modified reward directly reuses Team1 v3_depth `ant.rewards.TotalReward`, manager term `total_reward` weight1. Internal weights: progress2.5, alive0.5, upright0.05, move_to_target1.5, foot_contact1, action_l2−0.005, energy−0.15, joint_velocity−0.001, joint_pos_limits−0.5, foot_slip−0.07. Reward-side contact separately uses the 3-frame maximum vertical force >5N; contact bonus requires at least two feet; slip penalizes contacted-feet XY speed. These semantics differ from observation-side contact.
+
+Fresh initialization: resume=false, load_run/load_checkpoint=null. PPO and action/reset/termination/terrain are unchanged from Stage 1. Selection rule fixed before training: highest logged completed-episode mean training return under the modified reward. The best checkpoint and last-iteration checkpoint are retained. Single-seed results do not establish general statistical significance.
+
+Decomposition observes the actual TotalReward function's weighted components without copying its calculations or changing its implementation. Each contribution is weighted_component × manager_weight(1) × control_dt. TotalReward episode_sums already apply dt once; dt is not applied twice. Terminal contributions are included, reset episodes excluded. Direct Stage 2 total-return comparison requires the DepthCam arm to use the identical modified reward.
+
+| Metric | HeightScan + Contact + Modified | DepthCam + Contact + Modified |
+|---|---:|---:|
+| Return | 134.8413 ± 68.0187 | TBD |
+| Displacement (m) | 56.5627 ± 28.3639 | TBD |
+| Duration (s) | 12.1187 ± 5.6815 | TBD |
+| Mean vx (m/s) | 4.0718 ± 1.5654 | TBD |
+| Fall | 43/100 | TBD |
+| Timeout | 57/100 | TBD |
+| Other | 0/100 | TBD |
+| >=5m | 86/100 | TBD |
+| Out-of-terrain-X | 26/100 | TBD |
+
+### Stage 2 reward decomposition
+
+| Component | HeightScan+Contact mean ± population std | DepthCam+Contact |
+|---|---:|---:|
+| progress | 141.3719 ± 70.9343 | TBD |
+| alive | 6.0558 ± 2.8440 | TBD |
+| upright | 0.5720 ± 0.2875 | TBD |
+| move_to_target | 16.4496 ± 8.0588 | TBD |
+| foot_contact | 2.5842 ± 1.3074 | TBD |
+| action_l2 | -0.1891 ± 0.3820 | TBD |
+| energy | -19.2751 ± 9.6769 | TBD |
+| joint_velocity | -2.6589 ± 1.3529 | TBD |
+| joint_pos_limits | -8.5355 ± 5.0240 | TBD |
+| foot_slip | -1.5334 ± 0.7835 | TBD |
+| total | 134.8413 ± 68.0187 | TBD |
+
+Residuals: step max=9e-08, episode max=4.57e-06, episode mean=9.97e-07.
+
+Boundary diagnostic: 26/100 terminal world-X positions outside [-102,102] m. Native Team1 has no boundary or torso-height termination, so displacement/return can include unsupported movement beyond the terrain mesh.
+
+Stage 1 and Stage 2 have different reward definitions. Do not subtract total returns to claim improvement. Physical metrics (displacement, duration, fall, timeout and reach ratios) may be inspected as descriptive diagnostics.

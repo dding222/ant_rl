@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import re
+import yaml
 from pathlib import Path
 import shutil
 import subprocess
@@ -55,6 +56,17 @@ def main():
     assert not t['resume'] and t['load_run'] is None and t['load_checkpoint'] is None
     assert e['finite'] and e['first_episode_only'] and read(OUT / 'smoke/smoke.json')['pass']
     assert t['checkpoint_sha256'] == read(RESULT / 'manifest.json')['checkpoint_sha256']
+    # Inspect only saved scalar config nodes: no Python-tag execution.
+    saved = yaml.compose((ROOT / 'logs/rsl_rl/ant/v3_depth/params/env.yaml').read_text())
+    def node_field(node, key):
+        return next(value for name,value in node.value if name.value == key)
+    saved_sensor = node_field(node_field(saved, 'scene'), 'contact_forces')
+    actual_sensor = read(TRAIN / 'config.json')['scene']['contact_forces']
+    for key in ['prim_path','history_length','force_threshold','track_air_time','update_period']:
+        actual_value = actual_sensor[key]
+        if key == 'prim_path':
+            actual_value = actual_value.replace('{ENV_REGEX_NS}', '/World/envs/env_.*')
+        assert yaml.safe_load(yaml.serialize(node_field(saved_sensor,key))) == actual_value, key
     core = read(EXP / 'shared/source_parity.json')
     for folder in [OUT / 'smoke', TRAIN, RESULT]:
         p = read(folder / 'source_parity.json')
@@ -97,7 +109,7 @@ def main():
     t['repository_checkpoint'] = records['best_model.pt']['path']
     t['repository_final_checkpoint'] = records['final_model.pt']['path']
     m.update(training=t, evaluation=read(RESULT / 'manifest.json'), comparison_arm='HeightScan', stage2=True,
-             environment_reward_ppo_observation_parity=True, evaluation_terrain_assignment_parity=True)
+             environment_ppo_heightscan_proprio_parity_with_stage1=True, modified_reward_parity_with_saved_v3_depth=True, reward_sensor_parity_with_saved_v3_depth=True, observation_change="appended canonical explicit 4-D contact", reward_change="Team1 v3_depth TotalReward in training and evaluation", evaluation_terrain_assignment_parity=True)
     dump(OUT / 'manifest.json', m)
     dump(OUT / 'training_summary.json', t)
     dump(OUT / 'checkpoint_selection.json', dict(rule=t['selection'], fixed_before_training=True,
@@ -108,8 +120,8 @@ def main():
     with (OUT / 'main_metrics.csv').open('w', newline='') as f:
         w = csv.DictWriter(f, fieldnames=['metric','mean','std','min','max','count','ratio'], lineterminator='\n')
         w.writeheader(); w.writerows(dict(metric=k, **v) for k,v in e['metrics'].items())
-    dump(OUT / 'parity.json', dict(environment=True, reward=True, ppo=True, architecture=True,
-         observation=True, terrain_mesh=True, evaluation_terrain_assignment=True, stage2=True))
+    dump(OUT / 'parity.json', dict(environment_with_stage1=True, modified_reward_with_saved_v3_depth=True, ppo_with_stage1=True, architecture_with_stage1=True,
+         proprio_heightscan_with_stage1=True, explicit_contact_canonical=True, terrain_mesh=True, evaluation_terrain_assignment=True, stage2=True))
     for name in ['contact_observation_validation.json', 'heightscan_validation.json']:
         shutil.copyfile(OUT / 'smoke' / name, OUT / name)
     shutil.copyfile(TRAIN / 'training_curve.csv', OUT / 'training_curve.csv')
@@ -121,7 +133,7 @@ def main():
     proto_path = EXP / 'shared/stage2_contact_modified_protocol.json'
     proto = read(proto_path)
     proto.update(status='HeightScan complete; DepthCam Stage 2 arm TBD', implementation_commit=m['git_commit'],
-                 heightscan_checkpoint=records['best_model.pt']['path'])
+                 heightscan_checkpoint=records['best_model.pt']['path'], runtime_frozen_config='heightscan_contact_modified_4096x32x1000/results/source_parity.json')
     dump(proto_path, proto)
     prefix = (EXP / 'README.md').read_text().split('## Stage 2 — Contact + Modified Reward')[0].rstrip()
     metrics = e['metrics']; rewards = e['reward_components']
