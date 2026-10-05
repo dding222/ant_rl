@@ -4,7 +4,7 @@
 
 특히 terrain 정보를 직접 높이값으로 제공하는 HeightScan과 depth image를 CNN으로 처리하는 DepthCam을 비교하여, 서로 다른 terrain representation이 Ant locomotion에 미치는 영향을 분석하고자 한다. 비교의 공정성을 위해 동일한 terrain/environment, PPO 설정, seed, training budget을 공통 기준으로 고정하였다. Stage 1에서는 Stock Reward 조건에서 두 perception 방식을 비교하고, Stage 2에서는 동일한 Contact observation + Modified Reward 조건에서도 비교를 반복하도록 실험을 구성하였다.
 
-Modified Reward는 단순한 전진 보상 위주의 학습에서 반복적인 jumping/hopping 형태의 이동이 나타나는 경향을 완화하고, ground contact, foot slip, joint motion, control effort를 함께 고려하도록 reward objective를 확장하기 위해 도입하였다. 각 조건에서는 return뿐 아니라 displacement, episode duration, fall/timeout, reward decomposition을 함께 기록해 locomotion 특성을 분석한다. 현재 HeightScan arm의 학습과 평가는 완료했으며, DepthCam 결과는 동일한 protocol의 실험이 완료되면 추가한다.
+Modified Reward는 단순한 전진 보상 위주의 학습에서 반복적인 jumping/hopping 형태의 이동이 나타나는 경향을 완화하고, ground contact, foot slip, joint motion, control effort를 함께 고려하도록 reward objective를 확장하기 위해 도입하였다. 각 조건에서는 return뿐 아니라 displacement, episode duration, fall/timeout, reward decomposition을 함께 기록해 locomotion 특성을 분석한다.
 
 ## 연구 목적
 
@@ -12,18 +12,18 @@ Modified Reward는 단순한 전진 보상 위주의 학습에서 반복적인 j
 
 ## 전체 실험 구성
 
-| Stage | HeightScan arm | DepthCam arm | Reward |
+| Stage | HeightScan 조건 | DepthCam 조건 | Reward |
 |---|---|---|---|
 | Stage 1 | HeightScan | DepthCam | Stock Isaac-Ant reward |
 | Stage 2 | HeightScan + Contact | DepthCam + Contact | Modified reward |
 
-Stage 1은 terrain representation을 비교하는 기본 조건이다. Stage 2에서는 양쪽 arm에 동일한 explicit Contact observation과 Modified Reward를 적용한 뒤 비교를 반복한다. 각 stage에서 비교하려는 변수는 terrain representation이며, 센서별 encoder 차이는 허용한다.
+Stage 1은 terrain representation을 비교하는 기본 조건이다. Stage 2에서는 두 조건에 동일한 explicit Contact observation과 Modified Reward를 적용한 뒤 비교를 반복한다. 각 stage에서 비교하려는 변수는 terrain representation이며, 센서별 encoder 차이는 허용한다.
 
 > **비교 원칙:** Stage 1과 Stage 2는 reward 구성과 scale이 다르므로 total return 값의 차이를 직접적인 성능 향상량으로 해석하지 않는다. 공통 protocol이 일치하는지 확인한 뒤 **같은 stage 안에서** HeightScan과 DepthCam을 비교한다. Stage 간 물리적 지표는 참고할 수 있지만, 이 실험만으로 Contact와 reward 변경의 개별 효과를 분리할 수는 없다.
 
 ## 공통 학습 조건
 
-다음 조건은 두 stage에 공통으로 적용한다. 진행 예정인 DepthCam arm도 동일한 protocol을 따라야 한다.
+다음 조건은 두 stage에 공통으로 적용한다. 진행 예정인 DepthCam 실험도 동일한 protocol을 따라야 한다.
 
 | 항목 | 설정 |
 |---|---|
@@ -47,7 +47,7 @@ Stage 1은 terrain representation을 비교하는 기본 조건이다. Stage 2�
 
 기존 Team1 root reset을 유지하며, joint position은 ±0.2, joint velocity는 ±0.1 범위로 초기화한다. 종료 조건은 timeout 또는 `body_z_down(pi/2)`이며, map boundary나 torso height에 따른 종료 조건은 추가하지 않는다.
 
-완료된 두 HeightScan arm의 PPO 설정은 동일하다. Learning rate는 0.0005 (adaptive), gamma는 0.99, lambda는 0.95, clip은 0.2, entropy coefficient는 0, value-loss coefficient는 1이다. Clipped value loss를 사용하며, 5 epochs, 4 minibatches, desired KL 0.01, max gradient norm 1로 설정했다. 초기 Gaussian noise std는 1이며 actor/critic observation normalization은 사용하지 않는다.
+완료된 두 HeightScan 실험의 PPO 설정은 동일하다. Learning rate는 0.0005 (adaptive), gamma는 0.99, lambda는 0.95, clip은 0.2, entropy coefficient는 0, value-loss coefficient는 1이다. Clipped value loss를 사용하며, 5 epochs, 4 minibatches, desired KL 0.01, max gradient norm 1로 설정했다. 초기 Gaussian noise std는 1이며 actor/critic observation normalization은 사용하지 않는다.
 
 Checkpoint 선택 규칙은 학습 전에 고정한다. 해당 stage의 training reward를 기준으로 **완료된 episode의 logged training mean return이 가장 높은 checkpoint**를 선택한다. 선택된 checkpoint와 마지막 iteration의 checkpoint를 모두 보존한다.
 
@@ -162,7 +162,7 @@ Return 최솟값/최댓값: **-18.0859 / 98.2898**.
 
 단순한 전진 보상 위주로 학습할 때 반복적인 jumping/hopping 형태의 이동이 나타나는 경향을 완화하고, 지면 접촉, foot slip, joint motion, control effort를 함께 고려하도록 reward objective를 확장하였다.
 
-이는 reward shaping의 설계 목적이며, 개별 term의 효과가 검증됐다는 의미는 아니다. 두 arm은 동일한 Contact observation과 Team1 v3_depth Modified Reward를 **학습과 평가 모두에** 사용해야 한다. 같은 stage 안에서 비교하려는 변수는 terrain representation이다.
+이는 reward shaping의 설계 목적이며, 개별 term의 효과가 검증됐다는 의미는 아니다. 두 조건은 동일한 Contact observation과 Team1 v3_depth Modified Reward를 **학습과 평가 모두에** 사용해야 한다. 같은 stage 안에서 비교하려는 변수는 terrain representation이다.
 
 ### Modified Reward
 
@@ -185,7 +185,7 @@ Team1 v3_depth의 `ant.rewards.TotalReward` 구현을 재사용하며, 저장된
 
 ### 공통 Contact 조건
 
-Stage 2의 두 arm 모두 동일한 네 발을 대상으로 **world-frame net-force norm > 1 N** 여부를 **binary float32**로 관측하며, **history는 사용하지 않는다**.
+Stage 2의 두 조건 모두 동일한 네 발을 대상으로 **world-frame net-force norm > 1 N** 여부를 **binary float32**로 관측하며, **history는 사용하지 않는다**.
 
 > **Reward-side Contact의 별도 정의:** Foot-contact reward와 foot-slip penalty는 **3-frame 최대 vertical force > 5 N**을 사용한다. Contact bonus는 최소 두 발이 접촉할 때 부여하며, slip penalty는 접촉 중인 발의 XY 속도를 반영한다. Observation-side Contact와는 force 기준과 history 처리 방식이 다르다.
 
@@ -208,7 +208,7 @@ Return 최솟값/최댓값: **-0.2848 / 220.2166**.
 
 ### Stage 2 Reward Decomposition
 
-각 값은 평균 ± population std로 표시한다. Total return을 직접 비교하려면 DepthCam arm도 동일한 Modified Reward를 사용해야 한다.
+각 값은 평균 ± population std로 표시한다. Total return을 직접 비교하려면 DepthCam 조건도 동일한 Modified Reward를 사용해야 한다.
 
 | Component | HeightScan + Contact + Modified | DepthCam + Contact + Modified |
 |---|---:|---:|
