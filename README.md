@@ -246,24 +246,17 @@ Baseline도 저장된 `agent.json`, `config.json`, training summary 기준으로
 | Height + Contact | 972 | 53.8264 |
 | Height + Contact + Modified Reward | 788 | 107.4448 |
 
-Baseline은 `ablation_baseline_stock_s42_e4096_n32_i1000` run에서 highest logged training mean return으로 선택된 checkpoint다. 별도 로컬 checkout `/home/zxro/ant_rl_submission`의 saved config 및 checkpoint selection artifact를 확인했으며, 원본 checkpoint와 현재 파일의 SHA-256도 일치한다.
-
 Modified Reward는 Stock Reward와 scale 및 term이 다르므로 **training mean return 107.44를 Stock 모델의 53.xx와 직접 비교하면 안 된다.**
 
 Checkpoint 위치:
 
 ```text
-observation-ablation/
-└── experiments/observation_ablation/
-    ├── heightscan_4096x32x1000/checkpoints/best_model.pt
-    ├── heightscan_contact_stock_4096x32x1000/checkpoints/best_model.pt
-    └── heightscan_contact_modified_4096x32x1000/checkpoints/best_model.pt
-```
-
-Baseline checkpoint:
-
-```text
-logs/rsl_rl/ant/baseline/best_model.pt
+logs/rsl_rl/
+└── ant/
+    ├── baseline/best_model.pt
+    ├── height/best_model.pt
+    ├── contact_height/best_model.pt
+    └── contact_height_modified/best_model.pt
 ```
 
 ---
@@ -338,7 +331,7 @@ python scripts/rsl_rl/play_one_episode.py \
   --headless
 ```
 
-Baseline 평가 명령 (현재 59-D observation adapter 지원이 필요하다):
+Baseline 평가 명령 :
 
 ```bash
 python scripts/rsl_rl/play_one_episode.py \
