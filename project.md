@@ -349,14 +349,15 @@ play 중 각 환경의 episode total reward를 누적하고, 모든 환경에서
 
 `play_one_episode.py`는 checkpoint를 환경 생성 전에 읽고 observation adapter를 자동 선택하므로 `--obs` 인자가 필요 없다.
 
-현재 자동 인식 대상:
+현재 자동 인식 방식:
 
-| Checkpoint 구조 | 적용 observation |
+| Checkpoint 구조 | 자동 구성 |
 |---|---|
-| `depth_encoder` 존재, actor input 123 | legacy Depth, contact 없음 |
-| `depth_encoder` 존재, actor input 127 | Depth+Contact |
-| 기본 MLP, actor input 127 | HeightScan+Contact |
-| 기본 MLP, actor input 382 | 외부 `ant_rough` 설정 |
+| `depth_encoder` 존재 | checkpoint의 depth embedding 크기와 actor 입력 차이로 contact 포함 여부 계산 |
+| `depth_encoder` 없음 | `59-D proprio + 63-D HeightScan`을 기준으로 base height/contact 포함 여부 계산 |
+| 기본 MLP, actor input 382 | 외부 `ant_rough` 전용 설정 |
+
+따라서 현재 프로젝트 형식의 122-D Height, 126-D Height+Contact, 127-D Height+Contact 모델을 별도 `--obs` 없이 구분한다. Depth는 123-D와 127-D 모델을 자동 구분한다.
 
 HeightScan+Contact의 contact observation은 현재 `feet_contacts.net_forces_w`의 현재값에 `1 N` threshold를 적용하므로 학습 원본과 같은 계산을 사용한다.
 
@@ -517,6 +518,7 @@ tensorboard --logdir logs/rsl_rl/ant --port 6006
 - `play.py`의 evaluation reward에는 `joint_pos_limits`, contact, slip penalty가 없다. 이는 의도적으로 학습 reward와 분리한 현재 실험안이다.
 - `play_one_episode.py`의 evaluation reward에는 `joint_pos_limits`가 포함되며 contact/slip은 포함되지 않는다.
 - `play.py`는 `--obs`를 직접 지정하지만 `play_one_episode.py`는 checkpoint 구조로 자동 판별한다.
+- `play_one_episode.py`의 자동 차원 구성은 이 프로젝트의 59-D proprioception, 63-D HeightScan, 4-D contact 구조를 기준으로 한다.
 - 현재 Height training observation은 126-D지만 Height config 설명과 `play.py`는 127-D를 기대한다.
 - `play.py --video` 사용 시 지정한 `video_length`에 도달하면 play loop가 종료된다.
 - `command.txt`의 영상 재생 예시 중 checkpoint가 폴더로 표시된 부분은 실제 `model_*.pt` 또는 `best_model.pt` 파일 경로로 바꿔야 한다.

@@ -136,6 +136,21 @@ def foot_contact_state(env, sensor_cfg: SceneEntityCfg, threshold: float) -> tor
     return (forces.norm(dim=-1) > threshold).float()
 
 
+def infer_optional_observations(input_dim: int, perception_dim: int) -> tuple[bool, bool]:
+    """Infer base-height and contact inputs from the policy input size."""
+    optional_dim = input_dim - 59 - perception_dim
+    include_contacts = optional_dim >= 4
+    if include_contacts:
+        optional_dim -= 4
+    if optional_dim not in (0, 1):
+        raise ValueError(
+            f"Cannot match actor input size {input_dim} to 59-D proprioception, "
+            f"{perception_dim}-D perception, optional base height, and optional 4-D contacts."
+        )
+    include_base_height = optional_dim == 1
+    return include_base_height, include_contacts
+
+
 @configclass
 class HeightScanContactObservationsCfg:
     """127-D observations used by the height-scan/contact checkpoint."""
@@ -190,21 +205,33 @@ def configure_checkpoint_inputs(env_cfg, agent_cfg, checkpoint_path: str) -> str
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     state_dict = checkpoint["model_state_dict"]
 
-    if any(name.startswith("depth_encoder.") for name in state_dict):
-        input_dim = state_dict["actor.0.weight"].shape[1]
-        if input_dim == 123:
+    input_dim = state_dict["actor.0.weight"].shape[1]
+    checkpoint_uses_depth = any(name.startswith("depth_encoder.") for name in state_dict)
+
+    if checkpoint_uses_depth:
+        embedding_weights = [
+            value
+            for name, value in state_dict.items()
+            if name.startswith("depth_encoder.") and name.endswith(".weight") and value.ndim == 2
+        ]
+        if len(embedding_weights) != 1:
+            raise ValueError("Cannot determine the depth embedding size from the checkpoint.")
+        depth_embedding_dim = embedding_weights[0].shape[0]
+        include_base_height, include_contacts = infer_optional_observations(input_dim, depth_embedding_dim)
+        if include_base_height:
+            raise ValueError("Depth checkpoints with base_height are not supported by the current policy ordering.")
+        if not include_contacts:
             env_cfg.observations.contact = None
             agent_cfg.obs_groups = {
                 "policy": ["policy", "depth"],
                 "critic": ["policy", "depth"],
             }
-            return "depth_cnn_123_legacy"
-        if input_dim == 127:
-            return "depth_cnn_contact_127"
-        raise ValueError(f"Unsupported depth checkpoint input size: {input_dim}")
+        return f"depth_cnn_{input_dim}d"
 
-    input_dim = state_dict["actor.0.weight"].shape[1]
-    agent_cfg.obs_groups = {}
+    agent_cfg.obs_groups = {
+        "policy": ["policy"],
+        "critic": ["policy"],
+    }
     agent_cfg.policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
         actor_obs_normalization=False,
@@ -215,7 +242,8 @@ def configure_checkpoint_inputs(env_cfg, agent_cfg, checkpoint_path: str) -> str
     )
     env_cfg.scene.depth_camera = None
 
-    if input_dim == 127:
+    if input_dim != 382:
+        include_base_height, include_contacts = infer_optional_observations(input_dim, perception_dim=63)
         env_cfg.scene.height_scanner = RayCasterCfg(
             prim_path="{ENV_REGEX_NS}/Robot/torso",
             offset=RayCasterCfg.OffsetCfg(pos=(0.8, 0.0, 20.0)),
@@ -226,20 +254,21 @@ def configure_checkpoint_inputs(env_cfg, agent_cfg, checkpoint_path: str) -> str
             debug_vis=False,
         )
         env_cfg.observations = HeightScanContactObservationsCfg()
-        return "height_scan_contact_127"
+        if not include_base_height:
+            env_cfg.observations.policy.base_height = None
+        if not include_contacts:
+            env_cfg.observations.policy.foot_contacts = None
+        return f"height_scan_{input_dim}d"
 
-    if input_dim == 382:
-        project_root = Path(__file__).resolve().parents[2]
-        sys.path.insert(0, str(project_root / "IsaacLab_Ant"))
-        from ant_rough.env_cfg import MySceneCfg as RoughSceneCfg
-        from ant_rough.env_cfg import ObservationsCfg as RoughObservationsCfg
+    project_root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(project_root / "IsaacLab_Ant"))
+    from ant_rough.env_cfg import MySceneCfg as RoughSceneCfg
+    from ant_rough.env_cfg import ObservationsCfg as RoughObservationsCfg
 
-        env_cfg.scene.height_scanner = RoughSceneCfg().height_scanner
-        env_cfg.scene.height_scanner.update_period = env_cfg.decimation * env_cfg.sim.dt
-        env_cfg.observations = RoughObservationsCfg()
-        return "height_scan_382"
-
-    raise ValueError(f"Unsupported checkpoint observation size: {input_dim}")
+    env_cfg.scene.height_scanner = RoughSceneCfg().height_scanner
+    env_cfg.scene.height_scanner.update_period = env_cfg.decimation * env_cfg.sim.dt
+    env_cfg.observations = RoughObservationsCfg()
+    return "height_scan_382d"
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
