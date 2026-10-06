@@ -44,3 +44,13 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.stage2_ppo_cfg:Stage2HeightScanContactPPORunnerCfg",
     },
 )
+
+gym.register(
+    id="Ant-rl-Ablation-HeightScan-Contact-Stock-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.contact_stock_env_cfg:HeightScanContactStockCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.contact_stock_ppo_cfg:HeightScanContactStockPPORunnerCfg",
+    },
+)
