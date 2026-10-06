@@ -1,0 +1,468 @@
+--- git status ---
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   command.txt
+	modified:   project.md
+	modified:   scripts/rsl_rl/play_one_episode.py
+	modified:   source/ant/ant_env_cfg.py
+	modified:   source/ant/rewards.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	IsaacLab_Ant/
+
+no changes added to commit (use "git add" and/or "git commit -a") 
+
+
+--- git diff ---
+diff --git a/command.txt b/command.txt
+index da08ece..395ef0d 100644
+--- a/command.txt
++++ b/command.txt
+@@ -34,7 +34,7 @@ PLAY
+ ====
+ 
+ 특정 체크포인트 재생:
+-python scripts/rsl_rl/play.py --task Ant-rl-v0 --num_envs 4 --checkpoint logs/rsl_rl/ant/RUN_FOLDER/best_model.pt
++python scripts/rsl_rl/play.py --task Ant-rl-v0 --num_envs 4 --checkpoint logs/rsl_rl/ant/
+ 
+ 재생 영상 저장 후 종료:
+ python scripts/rsl_rl/play.py --task Ant-rl-v0 --num_envs 1 --checkpoint logs/rsl_rl/ant/ --video --video_length 1000 --headless
+diff --git a/project.md b/project.md
+index 6e0b78a..6bcad41 100644
+--- a/project.md
++++ b/project.md
+@@ -72,6 +72,8 @@ ant/
+ - 경사도: `0.0 ~ 0.20`
+ - 중앙 platform 폭: `1.0 m`
+ 
++Terrain geometry는 학습 시작 시 한 번 생성된다. 각 environment가 episode reset될 때마다 `20 x 10` patch 중 하나를 무작위로 다시 선택하고, 변경된 terrain origin에서 Ant를 reset한다.
++
+ 주의: 초기 목표였던 **사각 높이 타일 한 종류만 사용하는 고정 terrain**과 현재 코드는 다르다. 현재는 계단, 역계단, 경사, 역경사, boxes가 섞인 rough terrain이다. 이것이 최종 실험 조건인지 다시 결정해야 한다.
+ 
+ ### 마찰계수
+@@ -195,6 +197,7 @@ Episode_Reward/foot_slip
+ 
+ ### Reset
+ 
++- episode가 끝난 environment는 기존 200개 terrain patch 중 하나를 무작위로 다시 선택
+ - root pose/velocity의 추가 randomization 없음
+ - joint position offset: `-0.2 ~ 0.2`
+ - joint velocity offset: `-0.1 ~ 0.1`
+@@ -318,6 +321,7 @@ tensorboard --logdir logs/rsl_rl/ant --port 6006
+ - [x] `Ant-rl-v0` custom task 등록
+ - [x] `ManagerBasedRLEnv + RSL-RL PPO` 학습 구조 정리
+ - [x] robot friction environment별 randomization
++- [x] episode reset마다 terrain patch 무작위 재선택
+ - [x] reward 계산을 `TotalReward` 하나로 통합
+ - [x] progress potential reset 동작 유지
+ - [x] contact reward와 foot-slip penalty 추가
+diff --git a/scripts/rsl_rl/play_one_episode.py b/scripts/rsl_rl/play_one_episode.py
+index 2e01a45..3b839a2 100644
+--- a/scripts/rsl_rl/play_one_episode.py
++++ b/scripts/rsl_rl/play_one_episode.py
+@@ -9,11 +9,13 @@
+ 
+ import argparse
+ import sys
++from pathlib import Path
+ 
+ from isaaclab.app import AppLauncher
+ 
+ # local imports
+ import cli_args  # isort: skip
++import ant  # noqa: F401
+ 
+ # add argparse arguments
+ parser = argparse.ArgumentParser(description="Play one episode with an RL agent from RSL-RL.")
+@@ -22,7 +24,9 @@ parser.add_argument("--video_length", type=int, default=200, help="Length of the
+ parser.add_argument(
+     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
+ )
+-parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
++parser.add_argument(
++    "--num_envs", "--num_env", dest="num_envs", type=int, default=None, help="Number of environments to simulate."
++)
+ parser.add_argument("--task", type=str, default=None, help="Name of the task.")
+ parser.add_argument(
+     "--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point."
+@@ -40,9 +44,8 @@ cli_args.add_rsl_rl_args(parser)
+ AppLauncher.add_app_launcher_args(parser)
+ # parse the arguments
+ args_cli, hydra_args = parser.parse_known_args()
+-# always enable cameras to record video
+-if args_cli.video:
+-    args_cli.enable_cameras = True
++# depth observations always require camera rendering
++args_cli.enable_cameras = True
+ 
+ # clear out sys.argv for Hydra
+ sys.argv = [sys.argv[0]] + hydra_args
+@@ -67,17 +70,166 @@ from isaaclab.envs import (
+     ManagerBasedRLEnvCfg,
+     multi_agent_to_single_agent,
+ )
++from isaaclab.managers import ObservationGroupCfg as ObsGroup
++from isaaclab.managers import ObservationTermCfg as ObsTerm
++from isaaclab.managers import RewardTermCfg as RewTerm
++from isaaclab.managers import SceneEntityCfg
++from isaaclab.sensors import RayCasterCfg, patterns
++from isaaclab.utils import configclass
+ from isaaclab.utils.assets import retrieve_file_path
+ from isaaclab.utils.dict import print_dict
+ from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
+ 
+-from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
++from isaaclab_rl.rsl_rl import (
++    RslRlBaseRunnerCfg,
++    RslRlPpoActorCriticCfg,
++    RslRlVecEnvWrapper,
++    export_policy_as_jit,
++    export_policy_as_onnx,
++)
+ 
+ import isaaclab_tasks  # noqa: F401
++import isaaclab_tasks.manager_based.classic.humanoid.mdp as mdp
+ from isaaclab_tasks.utils import get_checkpoint_path
+ from isaaclab_tasks.utils.hydra import hydra_task_config
+ 
+-# PLACEHOLDER: Extension template (do not remove this comment)
++from ant.depth_actor_critic import DepthActorCritic, register_depth_actor_critic
++
++register_depth_actor_critic()
++
++
++#########################
++# Evaluation rewards
++#########################
++
++
++@configclass
++class EvalRewardsCfg:
++    """Original Isaac Lab Ant rewards used for every checkpoint."""
++
++    progress = RewTerm(func=mdp.progress_reward, weight=1.0, params={"target_pos": (1000.0, 0.0, 0.0)})
++    alive = RewTerm(func=mdp.is_alive, weight=0.5)
++    upright = RewTerm(func=mdp.upright_posture_bonus, weight=0.1, params={"threshold": 0.93})
++    move_to_target = RewTerm(
++        func=mdp.move_to_target_bonus,
++        weight=0.5,
++        params={"threshold": 0.8, "target_pos": (1000.0, 0.0, 0.0)},
++    )
++    action_l2 = RewTerm(func=mdp.action_l2, weight=-0.005)
++    energy = RewTerm(func=mdp.power_consumption, weight=-0.05, params={"gear_ratio": {".*": 15.0}})
++    joint_pos_limits = RewTerm(
++        func=mdp.joint_pos_limits_penalty_ratio,
++        weight=-0.1,
++        params={"threshold": 0.99, "gear_ratio": {".*": 15.0}},
++    )
++
++
++#########################
++# Observation adapters
++#########################
++
++
++def foot_contact_state(env, sensor_cfg: SceneEntityCfg, threshold: float) -> torch.Tensor:
++    """Return one binary contact value for each selected foot."""
++    sensor = env.scene.sensors[sensor_cfg.name]
++    forces = sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids]
++    return (forces.norm(dim=-1).amax(dim=1) > threshold).float()
++
++
++@configclass
++class HeightScanContactObservationsCfg:
++    """127-D observations used by the height-scan/contact checkpoint."""
++
++    @configclass
++    class PolicyCfg(ObsGroup):
++        base_height = ObsTerm(func=mdp.base_pos_z)
++        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
++        base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
++        base_yaw_roll = ObsTerm(func=mdp.base_yaw_roll)
++        base_angle_to_target = ObsTerm(func=mdp.base_angle_to_target, params={"target_pos": (1000.0, 0.0, 0.0)})
++        base_up_proj = ObsTerm(func=mdp.base_up_proj)
++        base_heading_proj = ObsTerm(func=mdp.base_heading_proj, params={"target_pos": (1000.0, 0.0, 0.0)})
++        joint_pos_norm = ObsTerm(func=mdp.joint_pos_limit_normalized)
++        joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.2)
++        feet_body_forces = ObsTerm(
++            func=mdp.body_incoming_wrench,
++            scale=0.1,
++            params={
++                "asset_cfg": SceneEntityCfg(
++                    "robot", body_names=["front_left_foot", "front_right_foot", "left_back_foot", "right_back_foot"]
++                )
++            },
++        )
++        actions = ObsTerm(func=mdp.last_action)
++        height_scan = ObsTerm(
++            func=mdp.height_scan,
++            params={"sensor_cfg": SceneEntityCfg("height_scanner"), "offset": 0.5},
++            clip=(-1.0, 1.0),
++        )
++        foot_contacts = ObsTerm(
++            func=foot_contact_state,
++            params={
++                "sensor_cfg": SceneEntityCfg(
++                    "contact_forces",
++                    body_names=["front_left_foot", "front_right_foot", "left_back_foot", "right_back_foot"],
++                    preserve_order=True,
++                ),
++                "threshold": 1.0,
++            },
++        )
++
++        def __post_init__(self):
++            self.enable_corruption = False
++            self.concatenate_terms = True
++
++    policy: PolicyCfg = PolicyCfg()
++
++
++def configure_checkpoint_inputs(env_cfg, agent_cfg, checkpoint_path: str) -> str:
++    """Match the observation and policy configuration to a known checkpoint shape."""
++    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
++    state_dict = checkpoint["model_state_dict"]
++
++    if any(name.startswith("depth_encoder.") for name in state_dict):
++        return "depth_cnn_123"
++
++    input_dim = state_dict["actor.0.weight"].shape[1]
++    agent_cfg.obs_groups = {}
++    agent_cfg.policy = RslRlPpoActorCriticCfg(
++        init_noise_std=1.0,
++        actor_obs_normalization=False,
++        critic_obs_normalization=False,
++        actor_hidden_dims=[400, 200, 100],
++        critic_hidden_dims=[400, 200, 100],
++        activation="elu",
++    )
++    env_cfg.scene.depth_camera = None
++
++    if input_dim == 127:
++        env_cfg.scene.height_scanner = RayCasterCfg(
++            prim_path="{ENV_REGEX_NS}/Robot/torso",
++            offset=RayCasterCfg.OffsetCfg(pos=(0.8, 0.0, 20.0)),
++            ray_alignment="yaw",
++            pattern_cfg=patterns.GridPatternCfg(resolution=0.2, size=(1.6, 1.2)),
++            mesh_prim_paths=["/World/ground"],
++            max_distance=1.0e6,
++            debug_vis=False,
++        )
++        env_cfg.observations = HeightScanContactObservationsCfg()
++        return "height_scan_contact_127"
++
++    if input_dim == 382:
++        project_root = Path(__file__).resolve().parents[2]
++        sys.path.insert(0, str(project_root / "IsaacLab_Ant"))
++        from ant_rough.env_cfg import MySceneCfg as RoughSceneCfg
++        from ant_rough.env_cfg import ObservationsCfg as RoughObservationsCfg
++
++        env_cfg.scene.height_scanner = RoughSceneCfg().height_scanner
++        env_cfg.scene.height_scanner.update_period = env_cfg.decimation * env_cfg.sim.dt
++        env_cfg.observations = RoughObservationsCfg()
++        return "height_scan_382"
++
++    raise ValueError(f"Unsupported checkpoint observation size: {input_dim}")
+ 
+ 
+ @hydra_task_config(args_cli.task, args_cli.agent)
+@@ -115,6 +267,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
+     # set the log directory for the environment (works for all environment types)
+     env_cfg.log_dir = log_dir
+ 
++    policy_input = configure_checkpoint_inputs(env_cfg, agent_cfg, resume_path)
++    env_cfg.rewards = EvalRewardsCfg()
++    print(f"[INFO] Checkpoint input adapter: {policy_input}")
++
+     # configure the viewer to track the Ant root
+     env_cfg.viewer.origin_type = "asset_root"
+     env_cfg.viewer.asset_name = "robot"
+@@ -175,16 +331,23 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
+         normalizer = None
+ 
+     # export policy to onnx/jit
+-    export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+-    export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
+-    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
++    if isinstance(policy_nn, DepthActorCritic):
++        print("[INFO] Skipping JIT/ONNX export for the multimodal depth policy.")
++    else:
++        export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
++        export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
++        export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+ 
+     dt = env.unwrapped.step_dt
+ 
+     # reset environment
+     obs = env.get_observations()
+     timestep = 0
++    reward_names = env.unwrapped.reward_manager.active_terms
+     episode_rewards = torch.zeros(env.num_envs, dtype=torch.float64, device=env.device)
++    episode_reward_components = torch.zeros(
++        (env.num_envs, len(reward_names)), dtype=torch.float64, device=env.device
++    )
+     episode_steps = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+     finished = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+     # simulate environment
+@@ -199,6 +362,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
+             # Include the terminal step, then ignore auto-reset episodes for finished environments.
+             active = ~finished
+             episode_rewards[active] += rewards[active]
++            step_reward_components = env.unwrapped.reward_manager._step_reward.double() * env.unwrapped.step_dt
++            episode_reward_components[active] += step_reward_components[active]
+             episode_steps[active] += 1
+             finished |= dones.bool()
+         timestep += 1
+@@ -222,6 +387,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
+     print(f"[INFO] Completed first episodes: {completed}/{env.num_envs}")
+     if completed != env.num_envs:
+         print("[INFO] Statistics include partial episodes for unfinished environments.")
++    print("[RESULT] Reward component means:")
++    for index, name in enumerate(reward_names):
++        values = episode_reward_components[:, index]
++        print(f"[RESULT] {name}: mean={values.mean().item():.6f}, std={values.std(unbiased=False).item():.6f}")
++    component_sum_error = (episode_reward_components.sum(dim=1) - episode_rewards).abs().max().item()
++    print(f"[RESULT] Reward component sum max error: {component_sum_error:.8f}")
+     if env.num_envs == 1:
+         print(f"[RESULT] Episode reward total: {episode_rewards[0].item():.6f}")
+         print(f"[RESULT] Episode steps: {episode_steps[0].item()}")
+diff --git a/source/ant/ant_env_cfg.py b/source/ant/ant_env_cfg.py
+index 8f4e869..44e8021 100644
+--- a/source/ant/ant_env_cfg.py
++++ b/source/ant/ant_env_cfg.py
+@@ -226,6 +226,22 @@ class ObservationsCfg:
+     depth: DepthCfg = DepthCfg()
+ 
+ 
++def reselect_terrain(env, env_ids):
++    """Move resetting environments to randomly selected terrain patches."""
++    terrain = env.scene.terrain
++
++    if env_ids is None:
++        env_ids = torch.arange(env.num_envs, device=env.device)
++
++    num_rows, num_cols = terrain.terrain_origins.shape[:2]
++    terrain_levels = torch.randint(num_rows, (len(env_ids),), device=env.device)
++    terrain_types = torch.randint(num_cols, (len(env_ids),), device=env.device)
++
++    terrain.terrain_levels[env_ids] = terrain_levels
++    terrain.terrain_types[env_ids] = terrain_types
++    terrain.env_origins[env_ids] = terrain.terrain_origins[terrain_levels, terrain_types]
++
++
+ def randomize_robot_friction(env, env_ids, asset_cfg, min_fric, max_fric):
+     robot = env.scene[asset_cfg.name]
+ 
+@@ -250,6 +266,11 @@ def randomize_robot_friction(env, env_ids, asset_cfg, min_fric, max_fric):
+ class EventCfg:
+     """Configuration for events."""
+ 
++    reselect_terrain = EventTerm(
++        func=reselect_terrain,
++        mode="reset",
++    )
++
+     reset_base = EventTerm(
+         func=mdp.reset_root_state_uniform,
+         mode="reset",
+diff --git a/source/ant/rewards.py b/source/ant/rewards.py
+index 1ad3e3e..aaf325f 100644
+--- a/source/ant/rewards.py
++++ b/source/ant/rewards.py
+@@ -15,17 +15,31 @@ if TYPE_CHECKING:
+ # Reward weights
+ #########################
+ 
+-PROGRESS_WEIGHT = 2.5
+-ALIVE_WEIGHT = 0.5
+-UPRIGHT_WEIGHT = 0.05
+-HEADING_WEIGHT = 1.5
+-CONTACT_WEIGHT = 1.0
+-
+-ACTION_WEIGHT = -0.005
+-ENERGY_WEIGHT = -0.15
+-JOINT_VEL_WEIGHT = -0.001
+-JOINT_LIMIT_WEIGHT = -0.5
+-FOOT_SLIP_WEIGHT = -0.07
++FINAL_REWARD_WEIGHTS = {
++    "progress": 2.5,
++    "alive": 0.5,
++    "upright": 0.05,
++    "move_to_target": 1.5,
++    "foot_contact": 1.0,
++    "action_l2": -0.005,
++    "energy": -0.15,
++    "joint_velocity": -0.001,
++    "joint_pos_limits": -0.5,
++    "foot_slip": -0.07,
++}
++
++BASIC_REWARD_WEIGHTS = {
++    "progress": 1.0,
++    "alive": 0.5,
++    "upright": 0.1,
++    "move_to_target": 0.5,
++    "action_l2": -0.005,
++    "energy": -0.05,
++    "joint_pos_limits": -0.1,
++}
++
++ACTIVE_REWARD_WEIGHTS = FINAL_REWARD_WEIGHTS
++# ACTIVE_REWARD_WEIGHTS = BASIC_REWARD_WEIGHTS
+ 
+ #########################
+ # Contact parameter
+@@ -54,16 +68,7 @@ class TotalReward(ManagerTermBase):
+         self.foot_names = contact_sensor.body_names
+         self.foot_body_ids, _ = robot.find_bodies(contact_sensor.body_names, preserve_order=True)
+         self.episode_sums = {
+-            "progress": torch.zeros(env.num_envs, device=env.device),
+-            "alive": torch.zeros(env.num_envs, device=env.device),
+-            "upright": torch.zeros(env.num_envs, device=env.device),
+-            "move_to_target": torch.zeros(env.num_envs, device=env.device),
+-            "foot_contact": torch.zeros(env.num_envs, device=env.device),
+-            "action_l2": torch.zeros(env.num_envs, device=env.device),
+-            "energy": torch.zeros(env.num_envs, device=env.device),
+-            "joint_pos_limits": torch.zeros(env.num_envs, device=env.device),
+-            "joint_velocity": torch.zeros(env.num_envs, device=env.device),
+-            "foot_slip": torch.zeros(env.num_envs, device=env.device),
++            name: torch.zeros(env.num_envs, device=env.device) for name in ACTIVE_REWARD_WEIGHTS
+         }
+ 
+         gear_ratio = torch.full((env.num_envs, robot.num_joints), 15.0, device=env.device)
+@@ -201,17 +206,20 @@ class TotalReward(ManagerTermBase):
+         # Total reward
+         #########################
+ 
++        reward_values = {
++            "progress": progress_reward,
++            "alive": alive_reward,
++            "upright": upright_reward,
++            "move_to_target": heading_reward,
++            "foot_contact": contact_reward,
++            "action_l2": action_penalty,
++            "energy": energy_penalty,
++            "joint_velocity": vel_penalty,
++            "joint_pos_limits": joint_limit_penalty,
++            "foot_slip": foot_slip_penalty,
++        }
+         weighted_rewards = {
+-            "progress": PROGRESS_WEIGHT * progress_reward,
+-            "alive": ALIVE_WEIGHT * alive_reward,
+-            "upright": UPRIGHT_WEIGHT * upright_reward,
+-            "move_to_target": HEADING_WEIGHT * heading_reward,
+-            "foot_contact": CONTACT_WEIGHT * contact_reward,
+-            "action_l2": ACTION_WEIGHT * action_penalty,
+-            "energy": ENERGY_WEIGHT * energy_penalty,
+-            "joint_velocity": JOINT_VEL_WEIGHT * vel_penalty,
+-            "joint_pos_limits": JOINT_LIMIT_WEIGHT * joint_limit_penalty,
+-            "foot_slip": FOOT_SLIP_WEIGHT * foot_slip_penalty,
++            name: weight * reward_values[name] for name, weight in ACTIVE_REWARD_WEIGHTS.items()
+         }
+ 
+         for name, reward in weighted_rewards.items():
