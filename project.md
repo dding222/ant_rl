@@ -1,6 +1,6 @@
 # Isaac Lab Ant 프로젝트 현황
 
-최종 갱신: 2026-10-02
+최종 갱신: 2026-10-06
 
 이 문서는 현재 저장소의 실제 코드를 기준으로 작성했다.
 
@@ -10,14 +10,15 @@
 - 학습 알고리즘은 RSL-RL PPO를 사용한다.
 - Ant가 rough terrain과 서로 다른 마찰 조건에서도 안정적으로 전진하도록 학습한다.
 - 진행 방향과 목표 위치는 body/world `+X` 방향이다.
-- proprioception과 전방 depth image를 함께 policy observation으로 사용한다.
+- `--obs depth`와 `--obs height`를 이용해 전방 Depth Camera 또는 HeightScanner를 선택한다.
+- 두 perception 방식 모두 네 발의 binary contact observation을 사용할 수 있게 구성한다.
 
 ## 2. 현재 파일 구조와 역할
 
 ```text
 ant/
 ├── command.txt                         # train/play/TensorBoard 명령어
-├── PROJECT_STATUS.md                   # 현재 구현 및 진행 상황
+├── project.md                          # 현재 구현 및 진행 상황
 ├── scripts/rsl_rl/
 │   ├── cli_args.py                     # 공통 RSL-RL CLI 인자
 │   ├── train.py                        # PPO 학습 및 best_model 저장
@@ -25,9 +26,8 @@ ant/
 │   └── play_one_episode.py             # 향후 결과 기록용 1회 평가 스크립트
 └── source/ant/
     ├── __init__.py                     # `Ant-rl-v0` Gym 환경 등록
-    ├── ant_env_cfg.py                  # scene/terrain/obs/event/reward/termination
+    ├── ant_env_cfg.py                  # scene/terrain/obs 함수/event/reward/termination
     ├── rewards.py                      # 학습 reward 전체 계산
-    ├── depth_obs.py                    # depth 전처리
     ├── depth_actor_critic.py           # depth CNN + actor/critic
     └── agents/rsl_rl_ppo_cfg.py        # PPO 및 policy 설정
 ```
@@ -39,7 +39,9 @@ ant/
 - Gym ID: `Ant-rl-v0`
 - Environment: `isaaclab.envs:ManagerBasedRLEnv`
 - Environment config: `AntEnvCfg`
-- Agent config: `AntPPORunnerCfg`
+- Depth agent config: `AntPPORunnerCfg`
+- Height agent config: `AntHeightPPORunnerCfg`
+- `train.py`와 `play.py`의 `--obs depth|height`가 사용할 agent config를 선택한다.
 
 ### 시뮬레이션
 
@@ -86,7 +88,7 @@ Terrain geometry는 학습 시작 시 한 번 생성된다. 각 environment가 e
 
 `random_friction`은 `startup` event이므로 episode reset마다 다시 추출하지 않는다. 한 번 생성된 각 환경은 실행이 끝날 때까지 같은 마찰계수를 유지한다.
 
-## 4. Depth camera와 observation
+## 4. Sensor와 observation
 
 ### Depth camera
 
@@ -100,11 +102,11 @@ Terrain geometry는 학습 시작 시 한 번 생성된다. 각 environment가 e
 - 방향: 진행 방향 `+X` 기준 약 `10°` 아래
 - quaternion: `(0.9962, 0.0, 0.0872, 0.0)` (`w, x, y, z`)
 
-`train.py`와 `play.py`는 depth observation을 위해 camera rendering을 항상 활성화한다.
+`train.py`와 `play.py`는 `--obs depth`일 때 depth camera rendering을 활성화한다.
 
 ### Depth 전처리
 
-`depth_obs.normalized_depth()`가 다음 순서로 처리한다.
+`ant_env_cfg.normalized_depth()`가 다음 순서로 처리한다.
 
 1. `NaN`, `+Inf`, `-Inf` 값을 유효 거리로 치환
 2. depth를 `0.1 ~ 5.0 m`로 clamp
@@ -112,7 +114,39 @@ Terrain geometry는 학습 시작 시 한 번 생성된다. 각 environment가 e
 
 Camera clipping과 observation normalization 모두 `0.1 ~ 5.0 m` 범위를 사용한다.
 
-### Observation group
+### HeightScanner
+
+- sensor: `RayCasterCfg`
+- 부착 body: `{ENV_REGEX_NS}/Robot/torso`
+- 정렬: torso yaw 기준
+- 측정 범위: 전방 X `0.0 ~ 1.6 m`, 좌우 Y `-0.6 ~ 0.6 m`
+- 간격: `0.2 m`
+- ray 개수: `9 x 7 = 63`
+- ground mesh: `/World/ground`
+- observation offset: `0.5`
+- clipping: `[-1.0, 1.0]`
+
+`--obs height`에서는 depth camera를 비활성화하고 HeightScanner만 사용한다.
+
+### Binary foot contact
+
+Observation 전용 `feet_contacts` 센서는 다음 순서의 네 발을 측정한다.
+
+```text
+front_left_foot
+front_right_foot
+left_back_foot
+right_back_foot
+```
+
+- `history_length=0`: 현재 timestep만 사용
+- 현재 `net_forces_w`의 XYZ L2 norm 사용
+- 힘의 크기가 `1 N`을 초과하면 `1`, 아니면 `0`
+- 결과: 환경당 4-D float tensor
+
+이 센서는 reward용 `contact_forces` 센서와 별개다. Reward 센서는 최근 3개 contact-force history를 유지한다.
+
+### Depth observation group
 
 `policy` group에는 다음 proprioception이 들어간다.
 
@@ -127,7 +161,25 @@ Camera clipping과 observation normalization 모두 `0.1 ~ 5.0 m` 범위를 사�
 
 `depth` group에는 `(48, 64, 1)` normalized depth image가 들어간다.
 
-## 5. Depth policy 구조
+`contact` group에는 4-D binary foot contact가 들어간다. `base_height`는 현재 주석 처리되어 Depth proprioception은 59-D다.
+
+```text
+59-D proprioception + 64-D depth embedding + 4-D contact = 127-D
+```
+
+### Height observation group
+
+Height 모드는 기본 PPO가 받을 수 있도록 모든 값을 하나의 `policy` group으로 연결한다.
+
+```text
+proprioception + 63-D height scan + 4-D contact
+```
+
+현재 `HeightObservationsCfg`에서도 `base_height`가 주석 처리되어 있어 실제 입력은 `59 + 63 + 4 = 126-D`다. 반면 config 설명과 `play.py` 검사는 127-D를 기대하고 있으므로 현재 상태에서는 Height 학습/재생 전에 이 불일치를 해결해야 한다.
+
+## 5. PPO policy 구조
+
+### Depth PPO
 
 기본 MLP actor-critic 대신 `DepthActorCritic`을 사용한다.
 
@@ -140,7 +192,7 @@ depth image (48 x 64 x 1)
     -> Linear(128, 64)
     -> 64차원 depth embedding
 
-proprioception + 64차원 depth embedding
+59-D proprioception + 64-D depth embedding + 4-D contact
     -> actor MLP [400, 200, 100]
     -> critic MLP [400, 200, 100]
 ```
@@ -148,12 +200,38 @@ proprioception + 64차원 depth embedding
 - activation: `ELU`
 - actor/critic observation normalization: 비활성화
 - actor와 critic은 동일한 depth encoder 객체를 사용하지만, 각각의 forward에서 depth feature를 계산한다.
-- 기존 depth 없는 MLP checkpoint와 network shape이 다르므로 그대로 이어서 학습할 수 없다.
+- 기존 123-D Depth checkpoint는 contact 없이 `play.py`에서 재생할 수 있다.
+- 127-D Depth checkpoint는 contact를 포함한다.
+- 기본 MLP checkpoint와 network class가 다르므로 `--obs depth`로 기본 MLP checkpoint를 불러올 수 없다.
 - 현재 multimodal policy는 `play.py`에서 JIT/ONNX export를 건너뛴다.
+
+### Height PPO
+
+Height 모드는 CNN 없이 기본 `RslRlPpoActorCriticCfg`를 사용한다.
+
+```text
+concatenated Height policy observation
+    -> actor MLP [400, 200, 100]
+    -> critic MLP [400, 200, 100]
+```
+
+- activation: `ELU`
+- actor/critic observation normalization: 비활성화
+- `obs_groups`: actor와 critic 모두 `policy` 하나만 사용
+- 현재 의도한 구조는 GitHub HeightScan+Contact 모델과 같은 127-D지만, 실제 코드에서는 `base_height`가 꺼져 있어 126-D인 상태다.
+
+### Observation mode 선택
+
+`set_observation_mode()`가 environment 생성 전에 사용하지 않는 센서를 끈다.
+
+| 인자 | 활성 perception | Policy class |
+|---|---|---|
+| `--obs depth` | Depth Camera | `DepthActorCritic` |
+| `--obs height` | HeightScanner | 기본 RSL-RL `ActorCritic` |
 
 ## 6. 학습 reward
 
-`RewardsCfg`에는 `total_reward` 하나만 등록되어 있다.
+`RewardsCfg`에는 `total_reward` 하나만 등록되어 있다. 현재 활성 설정은 `FINAL_REWARD_WEIGHTS`다.
 
 ```python
 total_reward = RewTerm(func=rewards.TotalReward, weight=1.0)
@@ -177,6 +255,8 @@ total_reward = RewTerm(func=rewards.TotalReward, weight=1.0)
 | foot_slip | 접촉 중인 발의 XY 속도 합 | `-0.07` |
 
 접촉 판정은 최근 contact-force history에서 발별 수직 힘의 최대값이 `5 N`보다 큰지 확인한다.
+
+`ACTIVE_REWARD_WEIGHTS`를 `BASIC_REWARD_WEIGHTS`로 바꾸면 original Ant의 7개 항목만 사용한다. BASIC 모드에는 `foot_contact`, `joint_velocity`, `foot_slip`이 포함되지 않는다.
 
 각 weighted reward는 episode 동안 누적되어 TensorBoard의 다음 항목으로 기록된다.
 
@@ -222,6 +302,8 @@ Episode_Reward/foot_slip
 - mini-batches: `4`
 - entropy coefficient: `0.0`
 
+Depth와 Height는 PPO algorithm hyperparameter를 공유하고 policy network class만 다르다.
+
 일반 checkpoint 외에 runner의 완료 episode 평균 reward가 이전 최고값을 넘으면 run 폴더에 `best_model.pt`를 저장한다. 저장 정보에는 해당 `mean_reward`가 포함된다.
 
 주의: 재개 학습을 시작하면 `BestModelRunner.best_mean_reward`는 다시 `-inf`에서 시작한다. 이전 run의 최고 reward를 복구하여 비교하는 구조는 아직 없다.
@@ -234,7 +316,11 @@ Episode_Reward/foot_slip
 
 ## 9. Play와 평가
 
+### `play.py`
+
 `play.py`는 학습 reward 대신 별도 `EvalRewardsCfg`를 environment 생성 전에 적용한다. 따라서 화면 재생 중 출력되는 episode total reward는 학습 reward와 다르다.
+
+`--obs depth|height`를 사용자가 직접 지정해야 한다. Checkpoint의 `depth_encoder` 존재 여부와 선택한 모드가 다르면 오류를 출력한다.
 
 고정 평가 reward:
 
@@ -259,6 +345,28 @@ play 중 각 환경의 episode total reward를 누적하고, 모든 환경에서
 - episode duration
 - 저장 위치: checkpoint run 폴더의 `play_episode_velocities.csv`
 
+### `play_one_episode.py`
+
+`play_one_episode.py`는 checkpoint를 환경 생성 전에 읽고 observation adapter를 자동 선택하므로 `--obs` 인자가 필요 없다.
+
+현재 자동 인식 대상:
+
+| Checkpoint 구조 | 적용 observation |
+|---|---|
+| `depth_encoder` 존재, actor input 123 | legacy Depth, contact 없음 |
+| `depth_encoder` 존재, actor input 127 | Depth+Contact |
+| 기본 MLP, actor input 127 | HeightScan+Contact |
+| 기본 MLP, actor input 382 | 외부 `ant_rough` 설정 |
+
+HeightScan+Contact의 contact observation은 현재 `feet_contacts.net_forces_w`의 현재값에 `1 N` threshold를 적용하므로 학습 원본과 같은 계산을 사용한다.
+
+평가 reward는 original Ant의 다음 7개 항목을 사용한다.
+
+```text
+progress, alive, upright, move_to_target,
+action_l2, energy, joint_pos_limits
+```
+
 ## 10. 실행 명령
 
 상세 인자는 `command.txt`를 참고한다.
@@ -274,18 +382,31 @@ python -m pip install -e .
 ```bash
 python scripts/rsl_rl/train.py \
   --task Ant-rl-v0 \
+  --obs depth \
   --num_envs 4 \
   --max_iterations 1 \
   --headless
 ```
 
-### 일반 학습 예시
+### DepthCam 학습 예시
 
 ```bash
 python scripts/rsl_rl/train.py \
   --task Ant-rl-v0 \
-  --num_envs 256 \
-  --max_iterations 10000 \
+  --obs depth \
+  --num_envs 2048 \
+  --max_iterations 2000 \
+  --headless
+```
+
+### HeightScanner 학습 예시
+
+```bash
+python scripts/rsl_rl/train.py \
+  --task Ant-rl-v0 \
+  --obs height \
+  --num_envs 4096 \
+  --max_iterations 1000 \
   --headless
 ```
 
@@ -294,6 +415,7 @@ python scripts/rsl_rl/train.py \
 ```bash
 python scripts/rsl_rl/play.py \
   --task Ant-rl-v0 \
+  --obs depth \
   --num_envs 4 \
   --checkpoint logs/rsl_rl/ant/RUN_FOLDER/best_model.pt
 ```
@@ -303,9 +425,20 @@ python scripts/rsl_rl/play.py \
 ```bash
 python scripts/rsl_rl/play.py \
   --task Ant-rl-v0 \
+  --obs depth \
   --num_envs 4 \
   --checkpoint logs/rsl_rl/ant/RUN_FOLDER/best_model.pt \
   --record_vel
+```
+
+### 한 episode 자동 평가
+
+```bash
+python scripts/rsl_rl/play_one_episode.py \
+  --task Ant-rl-v0 \
+  --num_envs 100 \
+  --checkpoint logs/rsl_rl/ant/RUN_FOLDER/model_ITERATION.pt \
+  --headless
 ```
 
 ### TensorBoard
@@ -334,6 +467,13 @@ tensorboard --logdir logs/rsl_rl/ant --port 6006
 - [x] depth normalization observation 추가
 - [x] depth CNN embedding을 사용하는 custom actor-critic 추가
 - [x] 카메라를 `+X` 기준 약 10° 아래로 조정
+- [x] 현재 접촉력 기반 4-D binary contact observation 추가
+- [x] 63-ray HeightScanner 추가
+- [x] Depth/Height PPO config 분리
+- [x] `train.py`, `play.py`에 `--obs depth|height` 선택 추가
+- [x] `play_one_episode.py` checkpoint 구조 자동 판별
+- [x] depth/contact observation 함수를 `ant_env_cfg.py`로 통합
+- [x] 사용하지 않는 `depth_obs.py` 삭제
 
 ## 12. 다음 작업 및 확인 필요 사항
 
@@ -342,28 +482,32 @@ tensorboard --logdir logs/rsl_rl/ant --port 6006
 1. **Terrain 실험 조건 확정**
    - 기존 목표인 square height tiles 한 종류로 돌아갈지, 현재 mixed rough terrain을 최종 조건으로 사용할지 결정한다.
 
-2. **소규모 실행 검증**
-   - 4개 이하 environment에서 camera output shape/range, observation shape, PPO 1 iteration을 확인한다.
+2. **Height observation 차원 확정**
+   - GitHub 원본처럼 `base_height`를 포함해 127-D로 사용할지 결정한다.
+   - 현재 126-D 환경과 `play.py`의 127-D 검사 불일치를 수정한다.
+
+3. **소규모 실행 검증**
+   - 4개 이하 environment에서 Depth/Height observation shape과 PPO 1 iteration을 각각 확인한다.
    - 현재 문서 작성 과정에서는 Python syntax만 검사하며 학습과 simulator는 실행하지 않는다.
 
-3. **Depth policy 성능/비용 확인**
+4. **Depth policy 성능/비용 확인**
    - camera rendering과 CNN 때문에 가능한 environment 수가 크게 줄 수 있다.
    - 256 env부터 GPU memory와 simulation FPS를 확인한 뒤 env 수를 늘린다.
 
-4. **Reward scale 재검토**
+5. **Reward scale 재검토**
    - `foot_contact=+1.0`이 정지 또는 발 끌기 행동을 과도하게 유도하는지 확인한다.
    - `foot_slip`, `energy`, `joint_velocity`가 전진 reward를 압도하는지 TensorBoard에서 비교한다.
    - reward를 바꾸기 전 각 실험의 weight 파일을 보존한다.
 
-5. **평가 기준 확정**
-   - 현재 play의 6개 fixed evaluation reward를 최종 지표로 사용할지 결정한다.
+6. **평가 기준 확정**
+   - `play.py`의 6개 reward와 `play_one_episode.py`의 original Ant 7개 reward 중 최종 기준을 확정한다.
    - reward 외에도 평균 전진 속도, 이동 거리, fall rate, episode 길이를 함께 비교하는 것이 좋다.
 
-6. **마찰 robustness 평가 도구 추가**
+7. **마찰 robustness 평가 도구 추가**
    - terrain/seed를 고정하고 friction을 여러 고정값으로 sweep한다.
    - training 범위의 양 끝과 범위 밖 값을 포함해 성능을 저장한다.
 
-7. **`play_one_episode.py` 결과 기록 기능 정리**
+8. **`play_one_episode.py` 결과 기록 기능 정리**
    - 향후 학습 결과를 동일한 episode 단위로 기록하고 비교하기 위해 새로 받은 스크립트다.
    - 실제 결과 기록을 시작할 때 필요한 출력 항목과 저장 형식을 확정한다.
 
@@ -371,6 +515,9 @@ tensorboard --logdir logs/rsl_rl/ant --port 6006
 
 - `contact_forces.debug_vis=True`라서 대규모 headless 학습 성능에 영향을 줄 수 있다.
 - `play.py`의 evaluation reward에는 `joint_pos_limits`, contact, slip penalty가 없다. 이는 의도적으로 학습 reward와 분리한 현재 실험안이다.
+- `play_one_episode.py`의 evaluation reward에는 `joint_pos_limits`가 포함되며 contact/slip은 포함되지 않는다.
+- `play.py`는 `--obs`를 직접 지정하지만 `play_one_episode.py`는 checkpoint 구조로 자동 판별한다.
+- 현재 Height training observation은 126-D지만 Height config 설명과 `play.py`는 127-D를 기대한다.
 - `play.py --video` 사용 시 지정한 `video_length`에 도달하면 play loop가 종료된다.
 - `command.txt`의 영상 재생 예시 중 checkpoint가 폴더로 표시된 부분은 실제 `model_*.pt` 또는 `best_model.pt` 파일 경로로 바꿔야 한다.
-- 저장소에는 수정된 log artifact와 아직 Git에 추가되지 않은 depth 관련 파일이 있으므로 commit 전에 `git status`를 확인해야 한다.
+- 작업 트리에 아직 commit되지 않은 코드 변경이 있으므로 commit 전에 `git status`를 확인해야 한다.

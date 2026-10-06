@@ -32,6 +32,7 @@ class DepthActorCritic(nn.Module):
         depth_embedding_dim=64,
         proprioception_group="policy",
         depth_group="depth",
+        contact_group="contact",
         **kwargs,
     ):
         if kwargs:
@@ -41,9 +42,11 @@ class DepthActorCritic(nn.Module):
         self.obs_groups = obs_groups
         self.proprioception_group = proprioception_group
         self.depth_group = depth_group
+        self.contact_group = contact_group if contact_group in obs else None
 
         proprioception = obs[self.proprioception_group]
         depth = obs[self.depth_group]
+        contact_dim = obs[self.contact_group].shape[-1] if self.contact_group is not None else 0
         if proprioception.ndim != 2:
             raise ValueError(f"Expected 1D proprioception, received shape {tuple(proprioception.shape)}")
         if depth.ndim != 4 or depth.shape[-1] != 1:
@@ -63,7 +66,7 @@ class DepthActorCritic(nn.Module):
         )
 
         proprioception_dim = proprioception.shape[-1]
-        network_input_dim = proprioception_dim + depth_embedding_dim
+        network_input_dim = proprioception_dim + depth_embedding_dim + contact_dim
         self.actor = MLP(network_input_dim, num_actions, actor_hidden_dims, activation)
         self.critic = MLP(network_input_dim, 1, critic_hidden_dims, activation)
 
@@ -115,11 +118,17 @@ class DepthActorCritic(nn.Module):
 
     def _actor_input(self, obs):
         proprioception = self.actor_obs_normalizer(obs[self.proprioception_group])
-        return torch.cat((proprioception, self._depth_features(obs)), dim=-1)
+        features = [proprioception, self._depth_features(obs)]
+        if self.contact_group is not None:
+            features.append(obs[self.contact_group])
+        return torch.cat(features, dim=-1)
 
     def _critic_input(self, obs):
         proprioception = self.critic_obs_normalizer(obs[self.proprioception_group])
-        return torch.cat((proprioception, self._depth_features(obs)), dim=-1)
+        features = [proprioception, self._depth_features(obs)]
+        if self.contact_group is not None:
+            features.append(obs[self.contact_group])
+        return torch.cat(features, dim=-1)
 
     def update_distribution(self, obs):
         mean = self.actor(self._actor_input(obs))

@@ -25,6 +25,13 @@ parser.add_argument("--video_interval", type=int, default=2000, help="Interval b
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument(
+    "--obs",
+    type=str,
+    choices=("depth", "height"),
+    default="depth",
+    help="Observation and policy network to use.",
+)
+parser.add_argument(
     "--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point."
 )
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
@@ -38,8 +45,8 @@ cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 
-# depth observations always require camera rendering
-args_cli.enable_cameras = True
+args_cli.agent = f"rsl_rl_{args_cli.obs}_cfg_entry_point"
+args_cli.enable_cameras = args_cli.enable_cameras or args_cli.video or args_cli.obs == "depth"
 
 # clear out sys.argv for Hydra
 sys.argv = [sys.argv[0]] + hydra_args
@@ -92,6 +99,7 @@ from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 from ant.depth_actor_critic import register_depth_actor_critic
+from ant.ant_env_cfg import set_observation_mode
 
 register_depth_actor_critic()
 
@@ -135,6 +143,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     # override configurations with non-hydra CLI arguments
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+    set_observation_mode(env_cfg, args_cli.obs)
     agent_cfg.max_iterations = (
         args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg.max_iterations
     )

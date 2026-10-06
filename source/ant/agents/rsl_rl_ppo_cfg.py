@@ -16,6 +16,7 @@ class DepthActorCriticCfg(RslRlPpoActorCriticCfg):
     depth_embedding_dim: int = 64
     proprioception_group: str = "policy"
     depth_group: str = "depth"
+    contact_group: str = "contact"
 
 
 @configclass
@@ -25,8 +26,8 @@ class AntPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     save_interval = 50
     experiment_name = "ant"
     obs_groups = {
-        "policy": ["policy", "depth"],
-        "critic": ["policy", "depth"],
+        "policy": ["policy", "depth", "contact"],
+        "critic": ["policy", "depth", "contact"],
     }
     policy = DepthActorCriticCfg(
         init_noise_std=1.0,
@@ -49,4 +50,22 @@ class AntPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         lam=0.95,
         desired_kl=0.01,
         max_grad_norm=1.0,
+    )
+
+
+@configclass
+class AntHeightPPORunnerCfg(AntPPORunnerCfg):
+    """Basic PPO network for the 127-D HeightScan observation."""
+
+    obs_groups = {
+        "policy": ["policy"],
+        "critic": ["policy"],
+    }
+    policy = RslRlPpoActorCriticCfg(
+        init_noise_std=1.0,
+        actor_obs_normalization=False,
+        critic_obs_normalization=False,
+        actor_hidden_dims=[400, 200, 100],
+        critic_hidden_dims=[400, 200, 100],
+        activation="elu",
     )

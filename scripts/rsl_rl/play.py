@@ -28,6 +28,13 @@ parser.add_argument(
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument(
+    "--obs",
+    type=str,
+    choices=("depth", "height"),
+    default="depth",
+    help="Observation and policy network used by the checkpoint.",
+)
+parser.add_argument(
     "--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point."
 )
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
@@ -44,8 +51,8 @@ cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
 args_cli, hydra_args = parser.parse_known_args()
-# depth observations always require camera rendering
-args_cli.enable_cameras = True
+args_cli.agent = f"rsl_rl_{args_cli.obs}_cfg_entry_point"
+args_cli.enable_cameras = args_cli.enable_cameras or args_cli.video or args_cli.obs == "depth"
 
 # clear out sys.argv for Hydra
 sys.argv = [sys.argv[0]] + hydra_args
@@ -77,6 +84,7 @@ from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 from ant.depth_actor_critic import DepthActorCritic, register_depth_actor_critic
+from ant.ant_env_cfg import set_observation_mode
 
 register_depth_actor_critic()
 
@@ -129,6 +137,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     # override configurations with non-hydra CLI arguments
     agent_cfg: RslRlBaseRunnerCfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+    set_observation_mode(env_cfg, args_cli.obs)
 
     # set the environment seed
     # note: certain randomizations occur in the environment initialization so we set the seed here
@@ -148,6 +157,32 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
 
     # set the log directory for the environment (works for all environment types)
     env_cfg.log_dir = log_dir
+
+    checkpoint = torch.load(resume_path, map_location="cpu", weights_only=False)
+    state_dict = checkpoint["model_state_dict"]
+    checkpoint_uses_depth = any(name.startswith("depth_encoder.") for name in state_dict)
+    if checkpoint_uses_depth != (args_cli.obs == "depth"):
+        checkpoint_mode = "depth" if checkpoint_uses_depth else "height"
+        raise ValueError(
+            f"Checkpoint uses {checkpoint_mode} observations, but --obs {args_cli.obs} was selected."
+        )
+
+    if checkpoint_uses_depth:
+        input_dim = state_dict["actor.0.weight"].shape[1]
+        if input_dim == 123:
+            env_cfg.observations.contact = None
+            agent_cfg.obs_groups = {
+                "policy": ["policy", "depth"],
+                "critic": ["policy", "depth"],
+            }
+        elif input_dim != 127:
+            raise ValueError(f"Unsupported depth checkpoint input size: {input_dim}")
+        print(f"[INFO] Depth checkpoint actor input: {input_dim}")
+    else:
+        input_dim = state_dict["actor.0.weight"].shape[1]
+        if input_dim != 127:
+            raise ValueError(f"Unsupported height checkpoint input size: {input_dim}")
+        print(f"[INFO] Height checkpoint actor input: {input_dim}")
 
     env_cfg.rewards = EvalRewardsCfg()
 

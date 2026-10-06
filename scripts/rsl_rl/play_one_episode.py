@@ -132,8 +132,8 @@ class EvalRewardsCfg:
 def foot_contact_state(env, sensor_cfg: SceneEntityCfg, threshold: float) -> torch.Tensor:
     """Return one binary contact value for each selected foot."""
     sensor = env.scene.sensors[sensor_cfg.name]
-    forces = sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids]
-    return (forces.norm(dim=-1).amax(dim=1) > threshold).float()
+    forces = sensor.data.net_forces_w[:, sensor_cfg.body_ids]
+    return (forces.norm(dim=-1) > threshold).float()
 
 
 @configclass
@@ -170,7 +170,7 @@ class HeightScanContactObservationsCfg:
             func=foot_contact_state,
             params={
                 "sensor_cfg": SceneEntityCfg(
-                    "contact_forces",
+                    "feet_contacts",
                     body_names=["front_left_foot", "front_right_foot", "left_back_foot", "right_back_foot"],
                     preserve_order=True,
                 ),
@@ -191,7 +191,17 @@ def configure_checkpoint_inputs(env_cfg, agent_cfg, checkpoint_path: str) -> str
     state_dict = checkpoint["model_state_dict"]
 
     if any(name.startswith("depth_encoder.") for name in state_dict):
-        return "depth_cnn_123"
+        input_dim = state_dict["actor.0.weight"].shape[1]
+        if input_dim == 123:
+            env_cfg.observations.contact = None
+            agent_cfg.obs_groups = {
+                "policy": ["policy", "depth"],
+                "critic": ["policy", "depth"],
+            }
+            return "depth_cnn_123_legacy"
+        if input_dim == 127:
+            return "depth_cnn_contact_127"
+        raise ValueError(f"Unsupported depth checkpoint input size: {input_dim}")
 
     input_dim = state_dict["actor.0.weight"].shape[1]
     agent_cfg.obs_groups = {}

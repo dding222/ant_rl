@@ -15,7 +15,7 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors import ContactSensorCfg, TiledCameraCfg
+from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, TiledCameraCfg, patterns
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
 from isaaclab.utils import configclass
@@ -25,12 +25,42 @@ import isaaclab_tasks.manager_based.classic.humanoid.mdp as mdp
 # import isaaclab.terrains as terrain_gen
 import torch
 
-from . import depth_obs, rewards
+from . import rewards
 
 ##
 # Pre-defined configs
 ##
 from isaaclab_assets.robots.ant import ANT_CFG  # isort: skip
+
+
+#########################
+# Observation functions
+#########################
+
+
+def normalized_depth(
+    env,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("depth_camera"),
+    near_distance: float = 0.1,
+    far_distance: float = 5.0,
+) -> torch.Tensor:
+    """Return clipped depth images normalized to the range [0, 1]."""
+    camera = env.scene.sensors[sensor_cfg.name]
+    depth = camera.data.output["distance_to_camera"].clone()
+    depth = torch.nan_to_num(depth, nan=far_distance, posinf=far_distance, neginf=near_distance)
+    depth = depth.clamp_(near_distance, far_distance)
+    return (depth - near_distance) / (far_distance - near_distance)
+
+
+def binary_foot_contacts(
+    env,
+    sensor_cfg: SceneEntityCfg,
+    threshold: float = 1.0,
+) -> torch.Tensor:
+    """Return one binary contact observation for each selected foot."""
+    contact_sensor = env.scene.sensors[sensor_cfg.name]
+    contact_forces = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids]
+    return (torch.linalg.vector_norm(contact_forces, dim=-1) > threshold).float()
 
 # TERRAIN_CFG = terrain_gen.TerrainGeneratorCfg(
 #     seed=42,
@@ -145,13 +175,31 @@ class MySceneCfg(InteractiveSceneCfg):
         ),
     )
 
+    # height scanner: X=0.0~1.6 m, Y=-0.6~0.6 m, 0.2 m spacing
+    height_scanner = RayCasterCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/torso",
+        offset=RayCasterCfg.OffsetCfg(pos=(0.8, 0.0, 20.0)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.2, size=(1.6, 1.2)),
+        mesh_prim_paths=["/World/ground"],
+        debug_vis=False,
+    )
+
     # foot contacts
     contact_forces = ContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot/.*_foot",
         history_length=3,
         track_air_time=False,
         force_threshold=1.0,
-        debug_vis=True,
+        debug_vis=False,
+    )
+
+    feet_contacts = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/.*_foot",
+        history_length=0,
+        track_air_time=False,
+        force_threshold=1.0,
+        debug_vis=False,
     )
 
     # lights
@@ -209,7 +257,7 @@ class ObservationsCfg:
         """Depth images for the CNN encoder."""
 
         image = ObsTerm(
-            func=depth_obs.normalized_depth,
+            func=normalized_depth,
             params={
                 "sensor_cfg": SceneEntityCfg("depth_camera"),
                 "near_distance": 0.1,
@@ -221,9 +269,93 @@ class ObservationsCfg:
             self.enable_corruption = False
             self.concatenate_terms = True
 
+    @configclass
+    class ContactCfg(ObsGroup):
+        """Binary foot-contact observations."""
+
+        feet = ObsTerm(
+            func=binary_foot_contacts,
+            params={
+                "sensor_cfg": SceneEntityCfg(
+                    "feet_contacts",
+                    body_names=["front_left_foot", "front_right_foot", "left_back_foot", "right_back_foot"],
+                    preserve_order=True,
+                ),
+                "threshold": 1.0,
+            },
+        )
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
     # observation groups
     policy: PolicyCfg = PolicyCfg()
     depth: DepthCfg = DepthCfg()
+    contact: ContactCfg = ContactCfg()
+
+
+@configclass
+class HeightObservationsCfg:
+    """Stock Ant observations followed by height scan and foot contacts."""
+
+    @configclass
+    class PolicyCfg(ObsGroup):
+        """127-D HeightScan and contact observations for the basic PPO network."""
+
+        # base_height = ObsTerm(func=mdp.base_pos_z)
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel)
+        base_yaw_roll = ObsTerm(func=mdp.base_yaw_roll)
+        base_angle_to_target = ObsTerm(func=mdp.base_angle_to_target, params={"target_pos": (1000.0, 0.0, 0.0)})
+        base_up_proj = ObsTerm(func=mdp.base_up_proj)
+        base_heading_proj = ObsTerm(func=mdp.base_heading_proj, params={"target_pos": (1000.0, 0.0, 0.0)})
+        joint_pos_norm = ObsTerm(func=mdp.joint_pos_limit_normalized)
+        joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.2)
+        feet_body_forces = ObsTerm(
+            func=mdp.body_incoming_wrench,
+            scale=0.1,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot", body_names=["front_left_foot", "front_right_foot", "left_back_foot", "right_back_foot"]
+                )
+            },
+        )
+        actions = ObsTerm(func=mdp.last_action)
+        height_scan = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("height_scanner"), "offset": 0.5},
+            clip=(-1.0, 1.0),
+        )
+        foot_contacts = ObsTerm(
+            func=binary_foot_contacts,
+            params={
+                "sensor_cfg": SceneEntityCfg(
+                    "feet_contacts",
+                    body_names=["front_left_foot", "front_right_foot", "left_back_foot", "right_back_foot"],
+                    preserve_order=True,
+                ),
+                "threshold": 1.0,
+            },
+        )
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    policy: PolicyCfg = PolicyCfg()
+
+
+def set_observation_mode(env_cfg, obs_mode: str):
+    """Enable only the sensor and observations required by the selected policy."""
+    if obs_mode == "depth":
+        env_cfg.scene.height_scanner = None
+        return
+    if obs_mode == "height":
+        env_cfg.scene.depth_camera = None
+        env_cfg.observations = HeightObservationsCfg()
+        return
+    raise ValueError(f"Unsupported observation mode: {obs_mode}")
 
 
 def reselect_terrain(env, env_ids):

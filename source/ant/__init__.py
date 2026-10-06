@@ -22,5 +22,7 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.ant_env_cfg:AntEnvCfg",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:AntPPORunnerCfg",
+        "rsl_rl_depth_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:AntPPORunnerCfg",
+        "rsl_rl_height_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:AntHeightPPORunnerCfg",
     },
 )
