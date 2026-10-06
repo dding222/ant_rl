@@ -2,11 +2,12 @@
 
 Isaac Lab의 Ant locomotion 환경에서 **HeightScan**, **foot contact observation**, **reward shaping**이 rough-terrain locomotion에 미치는 영향을 비교한 실험이다.
 
-이 README는 `observation-ablation` 브랜치의 실험 설정과 artifact를 기준으로, 아래 세 모델만 정리한다.
+이 README는 `observation-ablation` 브랜치의 실험 설정과 artifact를 기준으로, 아래 네 모델을 정리한다.
 
-1. **Height**
-2. **Height + Contact**
-3. **Height + Contact + Modified Reward**
+1. **Baseline**
+2. **Height**
+3. **Height + Contact**
+4. **Height + Contact + Modified Reward**
 
 > 실험 source와 checkpoint는 `observation-ablation` 브랜치에 보존되어 있다.
 
@@ -16,12 +17,14 @@ Isaac Lab의 Ant locomotion 환경에서 **HeightScan**, **foot contact observat
 
 | 모델 | Observation | 입력 차원 | Reward |
 |---|---|---:|---|
+| **Baseline** | 59-D proprio | **59-D** | Stock |
 | **Height** | 59-D proprio + 63-D HeightScan | **122-D** | Stock |
 | **Height + Contact** | 59-D proprio + 63-D HeightScan + 4-D foot contact | **126-D** | Stock |
 | **Height + Contact + Modified Reward** | 59-D proprio + 63-D HeightScan + 4-D foot contact | **126-D** | Modified |
 
 비교 목적은 다음과 같다.
 
+- **Baseline → Height**: HeightScan observation 추가 효과
 - **Height → Height + Contact**: explicit foot-contact observation 추가 효과
 - **Height + Contact → Height + Contact + Modified Reward**: observation을 고정하고 reward 변경 효과
 
@@ -146,6 +149,14 @@ right_back_foot
 
 이 4-D contact observation은 proprioception에 이미 포함된 **24-D incoming foot wrench와 별개의 feature**다.
 
+### 3.4 Baseline — 59-D
+
+Baseline은 3.1의 proprioception만 사용하며, HeightScan, binary foot-contact observation, `base_height`는 포함하지 않는다. 저장된 observation config와 checkpoint의 `actor.0.weight` shape `(400, 59)`로 확인했다.
+
+```text
+59-D proprio = 59-D
+```
+
 ---
 
 ## 4. Policy / PPO
@@ -179,13 +190,15 @@ Observation
 | Max grad norm | `1.0` |
 | Observation normalization | off |
 
+Baseline도 저장된 `agent.json`, `config.json`, training summary 기준으로 위와 동일한 MLP / PPO 설정과 training budget을 사용했다.
+
 ---
 
 ## 5. Reward
 
 ### Stock Reward
 
-**Height**와 **Height + Contact**는 동일한 Isaac Lab Ant stock reward를 사용한다.
+**Baseline**, **Height**, **Height + Contact**는 동일한 Isaac Lab Ant stock reward를 사용한다.
 
 | Component | Weight |
 |---|---:|
@@ -228,9 +241,12 @@ Observation
 
 | 모델 | Best iteration | Training mean return |
 |---|---:|---:|
+| Baseline | 875 | 42.8354 |
 | Height | 804 | 53.0052 |
 | Height + Contact | 972 | 53.8264 |
 | Height + Contact + Modified Reward | 788 | 107.4448 |
+
+Baseline은 `ablation_baseline_stock_s42_e4096_n32_i1000` run에서 highest logged training mean return으로 선택된 checkpoint다. 별도 로컬 checkout `/home/zxro/ant_rl_submission`의 saved config 및 checkpoint selection artifact를 확인했으며, 원본 checkpoint와 현재 파일의 SHA-256도 일치한다.
 
 Modified Reward는 Stock Reward와 scale 및 term이 다르므로 **training mean return 107.44를 Stock 모델의 53.xx와 직접 비교하면 안 된다.**
 
@@ -244,14 +260,21 @@ observation-ablation/
     └── heightscan_contact_modified_4096x32x1000/checkpoints/best_model.pt
 ```
 
+Baseline checkpoint:
+
+```text
+logs/rsl_rl/ant/baseline/best_model.pt
+```
+
 ---
 
 ## 7. 동일 Reward 기준 평가
 
-현재 `scripts/rsl_rl/play_one_episode.py`는 checkpoint의 observation 구조를 자동 판별한 뒤, 세 모델을 **동일한 Stock 7-term evaluation reward**로 평가한다.
+현재 `scripts/rsl_rl/play_one_episode.py`는 checkpoint의 observation 구조를 자동 판별한 뒤, 네 모델을 **동일한 Stock 7-term evaluation reward**로 평가한다.
 
 평가 조건:
 
+- evaluation seed: 24
 - environments: 100
 - 각 environment의 첫 episode만 사용
 - 최대 episode 길이: 960 steps
@@ -261,25 +284,37 @@ observation-ablation/
 
 ### 평가 결과
 
-| Metric | Height | Height + Contact | Height + Contact + Modified |
-|---|---:|---:|---:|
-| Progress | 58.090 ± 31.014 | 56.040 ± 29.086 | **60.503 ± 28.118** |
-| Alive | 5.950 ± 2.913 | 6.105 ± 2.823 | **6.409 ± 2.666** |
-| Upright | 1.034 ± 0.560 | 1.103 ± 0.582 | **1.121 ± 0.549** |
-| Move to target | 4.945 ± 2.666 | 5.150 ± 2.797 | **5.469 ± 2.794** |
-| Action L2 | -2.764 ± 10.952 | **-0.496 ± 1.580** | -0.958 ± 2.827 |
-| Energy | -6.986 ± 3.699 | **-6.114 ± 3.358** | -7.393 ± 3.326 |
-| Joint pos limits | -3.376 ± 2.151 | **-2.096 ± 1.873** | -3.878 ± 1.959 |
-| **Total reward** | 56.894 ± 31.797 | 59.692 ± 30.703 | **61.273 ± 28.546** |
-| **Episode steps** | 714.44 ± 349.10 | 732.97 ± 338.38 | **769.45 ± 319.46** |
+평가 명령은 네 모델 모두 다음 형식으로 통일했다.
 
-이 평가는 세 모델 모두 같은 reward 정의를 사용하므로 Total Reward를 동일 기준으로 비교할 수 있다.
+```bash
+python scripts/rsl_rl/play_one_episode.py \
+  --task Ant-rl-v0 \
+  --seed 24 \
+  --num_envs 100 \
+  --checkpoint logs/rsl_rl/ant/<MODEL>/best_model.pt \
+  --headless
+```
+
+| Metric | Baseline | Height | Height + Contact | Height + Contact + Modified |
+|---|---:|---:|---:|---:|
+| Progress | 43.848 ± 25.426 | 57.563 ± 30.857 | 54.645 ± 29.802 | 60.231 ± 27.680 |
+| Alive | 5.776 ± 2.974 | 5.908 ± 2.867 | 5.950 ± 2.957 | 6.367 ± 2.666 |
+| Upright | 1.042 ± 0.592 | 1.019 ± 0.563 | 1.077 ± 0.600 | 1.118 ± 0.554 |
+| Move to target | 5.448 ± 3.013 | 5.072 ± 2.721 | 5.140 ± 2.799 | 5.396 ± 2.809 |
+| Action L2 | -0.252 ± 0.721 | -2.316 ± 10.196 | -0.288 ± 0.943 | -0.969 ± 2.422 |
+| Energy | -5.423 ± 3.077 | -6.881 ± 3.668 | -6.084 ± 3.427 | -7.385 ± 3.393 |
+| Joint pos limits | -3.313 ± 1.792 | -3.322 ± 2.072 | -1.918 ± 1.340 | -3.871 ± 1.988 |
+| **Total reward** | 47.126 ± 27.127 | 57.044 ± 32.481 | 58.522 ± 31.765 | **60.886 ± 28.362** |
+| **Episode steps** | 693.58 ± 356.51 | 709.43 ± 343.60 | 714.37 ± 354.38 | **764.39 ± 319.57** |
+
+이 평가는 네 모델 모두 같은 reward 정의를 사용하므로 Total Reward를 동일 기준으로 비교할 수 있다.
 
 현재 결과에서는:
 
-- Contact 추가 후 Total Reward와 평균 episode length가 증가했다.
-- Modified Reward로 학습한 모델은 동일 Stock evaluation 기준에서도 세 모델 중 가장 높은 Total Reward와 평균 episode length를 기록했다.
-- 단일 training seed 결과이므로 일반적인 통계적 유의성을 의미하지는 않는다.
+- Baseline 대비 Height는 Total Reward와 평균 episode length가 증가했다.
+- Height에 Contact를 추가한 뒤 Total Reward와 평균 episode length가 추가로 증가했다.
+- Modified Reward로 학습한 모델은 동일 Stock evaluation 기준에서 네 모델 중 가장 높은 Total Reward와 평균 episode length를 기록했다.
+- 단일 training seed 및 단일 evaluation seed 결과이므로 일반적인 통계적 유의성을 의미하지 않는다.
 
 ---
 
@@ -300,6 +335,16 @@ python scripts/rsl_rl/play_one_episode.py \
   --task Ant-rl-v0 \
   --num_envs 100 \
   --checkpoint <CHECKPOINT_PATH> \
+  --headless
+```
+
+Baseline 평가 명령 (현재 59-D observation adapter 지원이 필요하다):
+
+```bash
+python scripts/rsl_rl/play_one_episode.py \
+  --task Ant-rl-v0 \
+  --num_envs 100 \
+  --checkpoint logs/rsl_rl/ant/baseline/best_model.pt \
   --headless
 ```
 

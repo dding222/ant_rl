@@ -242,6 +242,14 @@ def configure_checkpoint_inputs(env_cfg, agent_cfg, checkpoint_path: str) -> str
     )
     env_cfg.scene.depth_camera = None
 
+    if input_dim == 59:
+        env_cfg.scene.height_scanner = None
+        env_cfg.observations = HeightScanContactObservationsCfg()
+        env_cfg.observations.policy.base_height = None
+        env_cfg.observations.policy.height_scan = None
+        env_cfg.observations.policy.foot_contacts = None
+        return "baseline_59d"
+
     if input_dim != 382:
         include_base_height, include_contacts = infer_optional_observations(input_dim, perception_dim=63)
         env_cfg.scene.height_scanner = RayCasterCfg(
