@@ -1,3 +1,16 @@
+
+실행 명령어
+
+python scripts/rsl_rl/play_one_episode.py \
+    --task Ant-rl-v0 \
+    --seed 24 \
+    --num_envs 100 \
+    --checkpoint logs/rsl_rl/ant/contact_height_modified/best_model.pt \
+    --headless
+
+
+
+
 TRAIN
 =====
 
@@ -43,7 +56,7 @@ python scripts/rsl_rl/play.py --task Ant-rl-v0 --obs depth --num_envs 4 --checkp
 HeightScanner 체크포인트 재생:
 python scripts/rsl_rl/play.py --task Ant-rl-v0 --obs height --num_envs 4 --checkpoint logs/rsl_rl/ant/RUN_FOLDER/model_ITERATION.pt
 
-한 episode만 평가하고 종료:
+평가:
 python scripts/rsl_rl/play_one_episode.py --task Ant-rl-v0 --seed 24 --num_envs 100 --checkpoint logs/rsl_rl/ant/RUN_FOLDER/model_ITERATION.pt --headless
 
 play_one_episode.py는 checkpoint 구조를 보고 Depth/Height observation을 자동 선택하므로 --obs 인자가 필요 없음
